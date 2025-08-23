@@ -1,66 +1,93 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function AuthPage() {
+  const sb = supabaseBrowser();
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  const supabase = supabaseBrowser();
-
-  async function sendMagicLink(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    const next = new URLSearchParams(window.location.search).get("next") || "/";
-    const redirectTo =
-      `${process.env.NEXT_PUBLIC_APP_DOMAIN || window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+    setErr(null);
+    setLoading(true);
+    const next =
+      new URLSearchParams(window.location.search).get("next") || "/";
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo },
-    });
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    setLoading(false);
 
-    if (error) setError(error.message);
-    else setSent(true);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    // si todo ok -> dashboard o ruta next
+    window.location.href = next;
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border p-6 bg-white">
-        <h1 className="text-2xl font-semibold mb-1">Accede a Clientum Nóminas</h1>
-        <p className="text-sm text-gray-500 mb-6">Te enviaremos un enlace mágico al correo.</p>
-
-        {sent ? (
-          <div className="text-sm">
-            ✅ Revisa tu bandeja de entrada. Si no llega, mira el spam.
+    <div className="min-h-screen grid place-items-center p-6">
+      <div className="w-full max-w-md rounded-2xl border shadow-sm bg-[var(--card)]">
+        <div className="p-6 border-b">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-md bg-[var(--brand)]" />
+            <div className="font-semibold">Clientum Nóminas</div>
           </div>
-        ) : (
-          <form onSubmit={sendMagicLink} className="space-y-3">
-            <input
-              type="email"
-              required
-              placeholder="tu@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full border rounded-md p-2"
-            />
-            <button className="w-full rounded-md bg-black text-white py-2">Enviar enlace</button>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-          </form>
-        )}
-
-        {/* (Opcional) Botones OAuth
-        <div className="mt-6">
-          <button
-            onClick={() => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${process.env.NEXT_PUBLIC_APP_DOMAIN}/auth/callback` } })}
-            className="w-full border rounded-md py-2"
-          >
-            Continuar con Google
-          </button>
         </div>
-        */}
+
+        <form onSubmit={onSubmit} className="p-6 space-y-4">
+          <div>
+            <h1 className="text-xl font-semibold mb-1">Inicia sesión</h1>
+            <p className="text-sm text-[var(--muted)]">
+              Usa tus credenciales de Clientum.
+            </p>
+          </div>
+
+          <label className="block text-sm">Email</label>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-[var(--ring)]"
+            placeholder="tucorreo@empresa.com"
+          />
+
+          <div>
+            <label className="block text-sm">Contraseña</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              placeholder="••••••••"
+            />
+          </div>
+
+          {err && <p className="text-sm text-red-600">{err}</p>}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 rounded-md text-white font-medium bg-[var(--brand)] hover:bg-[var(--brand-600)] transition disabled:opacity-60"
+          >
+            {loading ? "Entrando…" : "Entrar"}
+          </button>
+
+          <div className="text-right">
+            <Link
+              href="/auth/reset"
+              className="text-sm text-[var(--brand)] hover:underline"
+            >
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </div>
+        </form>
       </div>
     </div>
   );
