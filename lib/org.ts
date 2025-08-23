@@ -1,12 +1,11 @@
 import { cookies } from 'next/headers'
-import { supabaseServer } from './supabase/server'
+import { requireUser } from './auth'
 
 const ORG_COOKIE = 'clientum_active_org'
 
 export async function getActiveOrgId() {
   const c = await cookies()
-  const id = c.get(ORG_COOKIE)?.value
-  return id || null
+  return c.get(ORG_COOKIE)?.value ?? null
 }
 
 export async function setActiveOrgId(orgId: string) {
@@ -15,15 +14,15 @@ export async function setActiveOrgId(orgId: string) {
 }
 
 export async function getUserMemberships() {
-  const { supabase, user } = await (await import('./auth')).requireUser()
+  const { supabase, user } = await requireUser()
   const { data, error } = await supabase
     .from('core.memberships')
-    .select('organization_id, role, core.organizations(id, name)')
+    .select('organization_id, role, core:core.organizations(id,name)')
     .eq('user_id', user.id)
   if (error) throw error
-  return data?.map(m => ({
+  return (data ?? []).map((m: any) => ({
     organization_id: m.organization_id,
     role: m.role,
-    name: (m as any).core?.organizations?.name ?? 'Empresa'
-  })) ?? []
+    name: m.core?.name ?? 'Empresa'
+  }))
 }
