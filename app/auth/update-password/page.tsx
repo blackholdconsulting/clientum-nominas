@@ -13,8 +13,7 @@ export default function UpdatePassword() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    // Supabase añade un access_token en la URL al abrir el enlace de reset;
-    // esto crea/recupera la sesión en el navegador.
+    // Cuando llegas desde el email de reset, Supabase añade tokens en la URL
     sb.auth.getSessionFromUrl({ storeSession: true }).finally(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -23,9 +22,8 @@ export default function UpdatePassword() {
     e.preventDefault();
     setErr(null);
     const { error } = await sb.auth.updateUser({ password: pwd });
-    if (error) {
-      setErr(error.message);
-    } else {
+    if (error) setErr(error.message);
+    else {
       setOk(true);
       setTimeout(() => router.replace("/"), 800);
     }
@@ -33,7 +31,7 @@ export default function UpdatePassword() {
 
   return (
     <div className="min-h-screen grid place-items-center p-6">
-      <div className="w-full max-w-md rounded-2xl border shadow-sm bg-[var(--card)] p-6 space-y-4">
+      <div className="w-full max-w-md rounded-2xl border shadow-sm bg-white p-6 space-y-4">
         <h1 className="text-xl font-semibold">Nueva contraseña</h1>
         <form onSubmit={change} className="space-y-3">
           <label className="block text-sm">Contraseña</label>
@@ -42,11 +40,11 @@ export default function UpdatePassword() {
             required
             value={pwd}
             onChange={(e) => setPwd(e.target.value)}
-            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-[var(--ring)]"
+            className="w-full border rounded-md p-2 outline-none focus:ring-2 focus:ring-[#0E7AFE]"
             placeholder="••••••••"
           />
           {err && <p className="text-sm text-red-600">{err}</p>}
-          <button className="w-full py-2 rounded-md text-white font-medium bg-[var(--brand)] hover:bg-[var(--brand-600)]">
+          <button className="w-full py-2 rounded-md text-white font-medium bg-[#0E7AFE] hover:bg-[#0969d8]">
             Guardar
           </button>
           {ok && <p className="text-sm text-green-600">Contraseña actualizada.</p>}
