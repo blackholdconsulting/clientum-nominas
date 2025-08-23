@@ -1,7 +1,6 @@
 "use client";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -15,15 +14,14 @@ export default function AuthCallback() {
     const supabase = supabaseBrowser();
 
     async function run() {
-      // Completa sesión desde los params/fragments de la URL (magic link / OAuth)
+      // Completa la sesión desde los tokens de la URL (magic link / OAuth)
       const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
-
       if (error) {
         setMsg(`Error: ${error.message}`);
         return;
       }
 
-      // Lee el ?next=... sin usar useSearchParams
+      // Lee ?next=... sin useSearchParams para evitar Suspense en build
       const search = typeof window !== "undefined" ? window.location.search : "";
       const nextParam = new URLSearchParams(search).get("next");
       const next = nextParam || "/org/select";
