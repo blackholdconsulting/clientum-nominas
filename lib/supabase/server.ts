@@ -1,36 +1,37 @@
+// lib/supabase/server.ts
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-export function supabaseServer() {
+export function getSupabaseServerClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const cookieStore = cookies();
 
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        // API nueva (recomendada)
-        get(name: string) {
+  const client = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      get: (name: string) => {
+        try {
           return cookieStore.get(name)?.value;
-        },
-        set(name: string, value: string, options?: any) {
-          cookieStore.set({ name, value, ...options });
-        },
-        remove(name: string, options?: any) {
-          // borrado: set con maxAge 0
-          cookieStore.set({ name, value: "", ...options, maxAge: 0 });
-        },
-
-        // Compat con versiones que aún piden getAll/setAll (no estorba)
-        getAll() {
-          return cookieStore.getAll().map((c) => ({ name: c.name, value: c.value }));
-        },
-        setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set({ name, value, ...options })
-          );
-        },
+        } catch {
+          return undefined;
+        }
       },
-    }
-  );
+      set: (name: string, value: string, options: any) => {
+        try {
+          cookieStore.set(name, value, options);
+        } catch {
+          /* ignore set cookie errors on edge/runtime */
+        }
+      },
+      remove: (name: string, options: any) => {
+        try {
+          cookieStore.set(name, "", { ...options, maxAge: 0 });
+        } catch {
+          /* ignore */
+        }
+      },
+    },
+  });
+
+  return client;
 }
