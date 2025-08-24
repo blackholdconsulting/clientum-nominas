@@ -1,44 +1,54 @@
 // app/contracts/models/page.tsx
-import { supabaseServer } from '@/lib/supabase/server'; // ajusta al helper de tu repo
-import Link from 'next/link';
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export default async function ModelsPage() {
+import Link from "next/link";
+import { supabaseServer } from "@/lib/supabase/server";
+
+export default async function ContractModelsPage() {
   const supabase = supabaseServer();
-  const { data: templates, error } = await supabase
-    .from('contract_templates')
-    .select('key, name, category, pdf_path')
-    .order('name');
+
+  // Listar plantillas del bucket contract-templates
+  const { data, error } = await supabase
+    .storage
+    .from("contract-templates")
+    .list("", { limit: 100, sortBy: { column: "name", order: "asc" } });
 
   if (error) {
-    return <div className="p-6 text-red-600">Error cargando modelos: {error.message}</div>;
+    return (
+      <div className="p-8">
+        <h1 className="text-xl font-semibold mb-2">Plantillas de contrato</h1>
+        <p className="text-red-600">Error al cargar: {error.message}</p>
+      </div>
+    );
   }
 
+  const files = (data ?? []).filter(f => !f.name.startsWith("."));
+
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">Modelos oficiales</h1>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {templates?.map((t) => (
-          <div key={t.key} className="rounded-xl border p-4">
-            <div className="mb-2 text-sm text-gray-500">{t.category}</div>
-            <div className="font-medium">{t.name}</div>
-            <div className="mt-4 flex items-center gap-2">
+    <div className="p-8">
+      <h1 className="text-2xl font-bold mb-6">Modelos oficiales</h1>
+
+      {files.length === 0 ? (
+        <p className="text-muted-foreground">No hay plantillas cargadas.</p>
+      ) : (
+        <ul className="space-y-3">
+          {files.map((f) => (
+            <li key={f.name} className="border rounded-md p-4 flex items-center justify-between">
+              <div>
+                <p className="font-medium">{f.name}</p>
+                <p className="text-sm text-muted-foreground">Plantilla oficial en PDF</p>
+              </div>
               <Link
-                className="rounded-md border px-3 py-1 text-sm hover:bg-gray-50"
-                href={`/contracts/models/${t.key}`}
+                href={`/contracts/models/${encodeURIComponent(f.name)}`}
+                className="inline-flex items-center rounded-md bg-emerald-700 text-white px-4 py-2 hover:bg-emerald-800"
               >
-                Editar / Rellenar
+                Usar plantilla
               </Link>
-              <a
-                className="rounded-md border px-3 py-1 text-sm hover:bg-gray-50"
-                href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${t.pdf_path}`}
-                target="_blank"
-              >
-                Ver PDF oficial
-              </a>
-            </div>
-          </div>
-        ))}
-      </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
