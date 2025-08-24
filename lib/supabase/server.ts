@@ -1,16 +1,26 @@
+// lib/supabase/server.ts
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-export function getSupabaseServerClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const store = cookies();
+export function supabaseServer() {
+  const cookieStore = cookies();
 
-  return createServerClient(url, anon, {
-    cookies: {
-      get: (name) => store.get(name)?.value,
-      set: (name, value, options) => { try { store.set(name, value, options); } catch {} },
-      remove: (name, options) => { try { store.set(name, "", { ...options, maxAge: 0 }); } catch {} },
-    },
-  });
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name: string, value: string, options: any) {
+          // Next 15: set() sirve para set/remove (value vacío)
+          cookieStore.set(name, value, options);
+        },
+        remove(name: string, options: any) {
+          cookieStore.set(name, "", options);
+        },
+      },
+    }
+  );
 }
