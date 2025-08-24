@@ -1,26 +1,56 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 
-const PUBLIC_PATHS = ['/auth', '/auth/callback', '/api/health']
+const PUBLIC_PATHS = [
+  "/auth",
+  "/auth/reset",
+  "/auth/update-password",
+  "/api/auth/login",
+  "/api/health",
+  "/api/dev/check-user",
+  "/api/dev/force-password",
+  "/api/dev/generate-recovery-link",
+  "/api/dev/whoami"
+];
 
-export function middleware(req: NextRequest) {
-  const url = req.nextUrl
-  if (PUBLIC_PATHS.some(p => url.pathname.startsWith(p))) return NextResponse.next()
+export async function middleware(req: NextRequest) {
+  const { pathname, search } = req.nextUrl;
 
-  const supabaseSession = req.cookies.get('sb-' ) // cookie de supabase (prefijo)
-  if (!supabaseSession) {
-    const login = new URL('/auth', url.origin)
-    login.searchParams.set('next', url.pathname)
-    return NextResponse.redirect(login)
+  // público
+  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return NextResponse.next();
   }
 
-  const orgCookie = req.cookies.get('clientum_active_org')?.value
-  if (!orgCookie && !url.pathname.startsWith('/org')) {
-    return NextResponse.redirect(new URL('/org/select', url.origin))
+  // cliente Supabase usando SOLO cookies del request (en middleware no podemos escribir)
+  const res = NextResponse.next();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get: (name: string) => req.cookies.get(name)?.value,
+        set: () => {},     // en middleware no se escriben cookies
+        remove: () => {},  // no-op
+      },
+    }
+  );
+
+  const { data, error } = await supabase.auth.getUser();
+
+  // Si error por token/cookies inválidos => a /auth
+  if (error || !data?.user) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/auth";
+    url.search = `?next=${encodeURIComponent(pathname + search)}`;
+    return NextResponse.redirect(url);
   }
-  return NextResponse.next()
+
+  return res;
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
-}
+  matcher: [
+    // protege todo excepto assets estáticos de Next
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
+  ],
+};
