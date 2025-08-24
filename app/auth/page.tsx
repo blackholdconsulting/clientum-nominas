@@ -19,18 +19,16 @@ export default function AuthPage() {
     setErr(null);
     setLoading(true);
     try {
-      const res = await fetch("/auth/login", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.error || "Correo o contraseña incorrectos");
       }
-
-      // ✅ la cookie httpOnly ya está fijada por el servidor
+      // Cookie httpOnly ya viene fijada por el server
       window.location.replace(nextUrl);
     } catch (e: any) {
       setErr(e?.message || "Error de autenticación");
