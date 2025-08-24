@@ -1,54 +1,54 @@
 // app/contracts/models/page.tsx
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
+import { getSupabaseServerClient } from "@/lib/supabase/server"; // lee cookies, no setea
 import Link from "next/link";
-import { supabaseServer } from "@/lib/supabase/server";
+
+export const revalidate = 0; // SSR puro
 
 export default async function ContractModelsPage() {
-  const supabase = supabaseServer();
+  const supabase = getSupabaseServerClient();
 
-  // Listar plantillas del bucket contract-templates
+  // lee plantillas públicas desde storage o una tabla de metadatos
+  // ejemplo si usas tabla contract_templates:
   const { data, error } = await supabase
-    .storage
-    .from("contract-templates")
-    .list("", { limit: 100, sortBy: { column: "name", order: "asc" } });
+    .from("contract_templates")
+    .select("key,label,category,version")
+    .order("category", { ascending: true })
+    .order("label", { ascending: true });
 
   if (error) {
     return (
-      <div className="p-8">
-        <h1 className="text-xl font-semibold mb-2">Plantillas de contrato</h1>
-        <p className="text-red-600">Error al cargar: {error.message}</p>
-      </div>
+      <main className="max-w-3xl mx-auto p-6">
+        <h1 className="text-2xl font-semibold mb-4">Plantillas de contrato</h1>
+        <p className="text-red-600">
+          Error al cargar: {error.message}
+        </p>
+      </main>
     );
   }
 
-  const files = (data ?? []).filter(f => !f.name.startsWith("."));
-
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold mb-6">Modelos oficiales</h1>
-
-      {files.length === 0 ? (
-        <p className="text-muted-foreground">No hay plantillas cargadas.</p>
-      ) : (
-        <ul className="space-y-3">
-          {files.map((f) => (
-            <li key={f.name} className="border rounded-md p-4 flex items-center justify-between">
+    <main className="max-w-3xl mx-auto p-6">
+      <h1 className="text-2xl font-semibold mb-4">Plantillas de contrato</h1>
+      <ul className="space-y-2">
+        {data?.map((tpl) => (
+          <li key={tpl.key} className="border p-3 rounded">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="font-medium">{f.name}</p>
-                <p className="text-sm text-muted-foreground">Plantilla oficial en PDF</p>
+                <div className="font-medium">{tpl.label}</div>
+                <div className="text-sm text-muted-foreground">
+                  {tpl.category} · v{tpl.version ?? "1"}
+                </div>
               </div>
               <Link
-                href={`/contracts/models/${encodeURIComponent(f.name)}`}
-                className="inline-flex items-center rounded-md bg-emerald-700 text-white px-4 py-2 hover:bg-emerald-800"
+                className="px-3 py-1 rounded bg-primary text-primary-foreground"
+                href={`/contracts/models/${encodeURIComponent(tpl.key)}`}
               >
-                Usar plantilla
+                Abrir
               </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </main>
   );
 }
