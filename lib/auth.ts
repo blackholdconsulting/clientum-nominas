@@ -1,31 +1,22 @@
 // lib/auth.ts
 import { redirect } from "next/navigation";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { supabaseServer } from "@/lib/supabase/server";
 
-/** No lanza: devuelve {supabase, user|null} */
-export async function softRequireUser() {
-  const supabase = getSupabaseServerClient();
-  try {
-    const { data, error } = await supabase.auth.getUser();
-    if (error) throw error;
-    return { supabase, user: data.user ?? null };
-  } catch {
-    return { supabase, user: null as any };
+/** Devuelve el usuario autenticado o redirige a /auth si no hay sesión */
+export async function requireUser() {
+  const supabase = supabaseServer();
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    redirect("/auth?next=" + encodeURIComponent("/"));
   }
+
+  return user;
 }
 
-/** Redirige a /auth si no hay sesión. */
-export async function hardRequireUser(nextPath: string = "/") {
-  const { supabase, user } = await softRequireUser();
-  if (!user) redirect(`/auth?next=${encodeURIComponent(nextPath)}`);
-  return { supabase, user };
-}
-
-/**
- * 🔁 Shim de compatibilidad:
- * muchos archivos importan { requireUser } de "@/lib/auth".
- * Lo mantenemos como alias de hardRequireUser para no romper importaciones.
- */
-export async function requireUser(nextPath?: string) {
-  return hardRequireUser(typeof nextPath === "string" ? nextPath : "/");
+/** Obtiene el usuario si existe (sin redirigir) */
+export async function getUserOptional() {
+  const supabase = supabaseServer();
+  const { data: { user } } = await supabase.auth.getUser();
+  return user ?? null;
 }
