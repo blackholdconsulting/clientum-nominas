@@ -1,30 +1,64 @@
 // app/contracts/models/[key]/page.tsx
-import { supabaseServer } from '@/lib/supabase/server';
-import FormClient from './form-client';
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export default async function ModelEditorPage({ params }: { params: { key: string } }) {
+import { notFound } from "next/navigation";
+import { supabaseServer } from "@/lib/supabase/server";
+
+type Props = { params: { key: string } };
+
+export default async function ContractTemplatePage({ params }: Props) {
   const supabase = supabaseServer();
-  const [{ data: tpl }, { data: employees }] = await Promise.all([
-    supabase.from('contract_templates').select('key,name,form_schema').eq('key', params.key).single(),
-    supabase.from('employees').select('id, first_name, last_name').order('first_name')
-  ]);
 
-  if (!tpl) {
+  // Asegura el nombre original del fichero (espacios, etc.)
+  const key = decodeURIComponent(params.key);
+
+  // Confirmar que el archivo existe listándolo (opcional, pero útil)
+  const { data: list, error: listErr } = await supabase
+    .storage
+    .from("contract-templates")
+    .list("", { search: key });
+
+  if (listErr) {
     return (
-      <div className="p-6">
-        <div className="rounded-xl bg-red-50 p-6 text-red-700">
-          Modelo no encontrado
-        </div>
+      <div className="p-8">
+        <h1 className="text-xl font-semibold mb-2">Plantilla</h1>
+        <p className="text-red-600">Error: {listErr.message}</p>
       </div>
     );
   }
 
-  const fields = (tpl.form_schema as any)?.fields ?? [];
+  const exists = (list ?? []).some(f => f.name === key);
+  if (!exists) return notFound();
+
+  // URL firmada para previsualizar
+  const { data: signed, error: sigErr } = await supabase
+    .storage
+    .from("contract-templates")
+    .createSignedUrl(key, 60 * 10); // 10 min
+
+  if (sigErr || !signed?.signedUrl) {
+    return (
+      <div className="p-8">
+        <h1 className="text-xl font-semibold mb-2">Plantilla</h1>
+        <p className="text-red-600">No se pudo generar la URL firmada.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">{tpl.name}</h1>
-      <FormClient templateKey={tpl.key} fields={fields} employees={employees ?? []} />
+    <div className="p-6 space-y-4">
+      <h1 className="text-2xl font-bold">Plantilla: {key}</h1>
+
+      <div className="rounded-md border overflow-hidden">
+        <iframe
+          src={signed.signedUrl}
+          className="w-full h-[80vh]"
+          title={`Plantilla ${key}`}
+        />
+      </div>
+
+      {/* Aquí después añadimos el botón "Rellenar/Editar" → abre un editor y luego guarda en `public.contracts` */}
     </div>
   );
 }
