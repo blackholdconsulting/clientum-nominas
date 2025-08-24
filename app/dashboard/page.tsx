@@ -11,70 +11,89 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Calculator,
-  Users,
-  FileText,
-  BarChart3,
-  LogOut,
-} from "lucide-react";
+import { Calculator, Users, FileText, BarChart3, LogOut } from "lucide-react";
 
-/**
- * Datos que se cargan:
- * - Empleados:     public.nominas_employees (vista de compatibilidad)
- * - Runs nómina:   public.payroll_runs      (user_id, period_year, period_month, status)
- * - Slips nómina:  public.payroll_slips     (run_id, gross, net, irpf, ss_employer)
- *
- * Multiusuario real: todas las consultas filtran por user.id (RLS hará el resto).
- */
+/** Helper seguro: nunca lanza, siempre devuelve {data?, error?} */
+async function safe<T>(p: Promise<{ data: T; error: any } | { data: T | null; error: any }>) {
+  try {
+    // @ts-ignore
+    const { data, error } = await p;
+    return { data: (data ?? null) as T | null, error: error ?? null };
+  } catch (e: any) {
+    return { data: null as T | null, error: e };
+  }
+}
 
 export default async function DashboardPage() {
   const { supabase, user } = await requireUser();
 
-  // ---------- Empleados (por usuario) ----------
-  const { count: employeesCount = 0 } = await supabase
-    .from("nominas_employees")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id);
-
-  // ---------- Último run de nómina ----------
-  const { data: latestRun } = await supabase
-    .from("payroll_runs")
-    .select("id, period_year, period_month, status")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  // ---------- Totales del último run ----------
-  let totals = { gross: 0, net: 0, irpf: 0, ss_er: 0 };
-  let hasSlipsTable = true;
-
-  if (latestRun?.id) {
-    try {
-      const { data: slips } = await supabase
-        .from("payroll_slips")
-        .select("gross, net, irpf, ss_employer")
-        .eq("run_id", latestRun.id);
-
-      if (slips?.length) {
-        totals = slips.reduce(
-          (acc: any, r: any) => ({
-            gross: acc.gross + Number(r.gross || 0),
-            net: acc.net + Number(r.net || 0),
-            irpf: acc.irpf + Number(r.irpf || 0),
-            ss_er: acc.ss_er + Number(r.ss_employer || 0),
-          }),
-          { gross: 0, net: 0, irpf: 0, ss_er: 0 }
-        );
-      }
-    } catch {
-      // Si la tabla no existe aún, seguimos sin romper UI
-      hasSlipsTable = false;
+  // ---------- Empleados ----------
+  let employeesCount = 0;
+  let employeesNote: string | null = null;
+  {
+    const { data, error } = await safe(
+      supabase.from("nominas_employees").select("*", { count: "exact", head: true }).eq("user_id", user.id)
+    );
+    if (error) {
+      employeesNote =
+        `No se ha podido leer "public.nominas_employees". ` +
+        `Detalle rápido: ${String(error?.message ?? error)}`;
+    } else {
+      // @ts-ignore
+      employeesCount = (data?.length ? data.length : 0) || (data?.count ?? 0) || 0;
     }
   }
 
-  // Placeholders para secciones aún no conectadas
+  // ---------- Último run ----------
+  type Run = { id: string; period_year: number; period_month: number; status: string; created_at?: string };
+  let latestRun: Run | null = null;
+  let runsNote: string | null = null;
+  {
+    const { data, error } = await safe<Run | null>(
+      // @ts-ignore
+      supabase
+        .from("payroll_runs")
+        .select("id, period_year, period_month, status, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    );
+    if (error) {
+      runsNote =
+        `No se ha podido leer "public.payroll_runs". ` +
+        `Detalle rápido: ${String(error?.message ?? error)}`;
+    } else {
+      latestRun = data ?? null;
+    }
+  }
+
+  // ---------- Totales del run ----------
+  let totals = { gross: 0, net: 0, irpf: 0, ss_er: 0 };
+  let slipsNote: string | null = null;
+
+  if (latestRun?.id) {
+    const { data, error } = await safe<any[]>(
+      // @ts-ignore
+      supabase.from("payroll_slips").select("gross, net, irpf, ss_employer").eq("run_id", latestRun.id)
+    );
+    if (error) {
+      slipsNote =
+        `No se ha podido leer "public.payroll_slips". ` +
+        `Detalle rápido: ${String(error?.message ?? error)}`;
+    } else if (data?.length) {
+      totals = data.reduce(
+        (acc, r) => ({
+          gross: acc.gross + Number(r.gross || 0),
+          net: acc.net + Number(r.net || 0),
+          irpf: acc.irpf + Number(r.irpf || 0),
+          ss_er: acc.ss_er + Number(r.ss_employer || 0),
+        }),
+        { gross: 0, net: 0, irpf: 0, ss_er: 0 }
+      );
+    }
+  }
+
   const contractsPending = 0;
   const reportsPending = 0;
 
@@ -87,14 +106,10 @@ export default async function DashboardPage() {
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
                 <Calculator className="h-7 w-7 text-primary" />
-                <h1 className="text-2xl font-bold font-serif text-primary">
-                  Clientum Nóminas
-                </h1>
+                <h1 className="text-2xl font-bold font-serif text-primary">Clientum Nóminas</h1>
               </div>
               <Badge variant="secondary">Dashboard</Badge>
             </div>
-
-            {/* Puedes cambiar esto por tu /api/auth/logout cuando lo tengas */}
             <form action="/auth?next=%2F" method="get">
               <Button variant="outline" size="sm">
                 <LogOut className="h-4 w-4 mr-2" />
@@ -107,7 +122,6 @@ export default async function DashboardPage() {
 
       {/* Main */}
       <main className="container mx-auto px-4 py-8">
-        {/* Título */}
         <div className="mb-8">
           <h2 className="text-3xl font-bold font-serif mb-2">
             Bienvenido{user.email ? `, ${user.email}` : ""}
@@ -158,29 +172,21 @@ export default async function DashboardPage() {
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle>Resumen financiero</CardTitle>
-              <CardDescription>
-                Costes de nómina del último periodo
-              </CardDescription>
+              <CardDescription>Costes de nómina del último periodo</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid md:grid-cols-3 gap-4">
                 <Kpi label="Total Bruto" value={`€${totals.gross.toFixed(2)}`} />
-                <Kpi
-                  label="Neto a pagar"
-                  value={`€${totals.net.toFixed(2)}`}
-                  classNameValue="text-green-600"
-                />
-                <Kpi
-                  label="IRPF"
-                  value={`€${totals.irpf.toFixed(2)}`}
-                  classNameValue="text-orange-600"
-                />
+                <Kpi label="Neto a pagar" value={`€${totals.net.toFixed(2)}`} classNameValue="text-green-600" />
+                <Kpi label="IRPF" value={`€${totals.irpf.toFixed(2)}`} classNameValue="text-orange-600" />
               </div>
-              {!hasSlipsTable && (
-                <p className="text-xs text-muted-foreground mt-3">
-                  Nota: aún no existe <code>public.payroll_slips</code>. Los
-                  totales aparecerán cuando crees tus primeras nóminas.
-                </p>
+
+              {(employeesNote || runsNote || slipsNote) && (
+                <div className="mt-4 space-y-1 text-xs text-muted-foreground">
+                  {employeesNote && <p>• {employeesNote}</p>}
+                  {runsNote && <p>• {runsNote}</p>}
+                  {slipsNote && <p>• {slipsNote}</p>}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -192,11 +198,7 @@ export default async function DashboardPage() {
             <CardContent className="space-y-3">
               <AlertPill
                 color="destructive"
-                text={
-                  employeesCount === 0
-                    ? "Aún no has añadido empleados"
-                    : "Sin alertas críticas"
-                }
+                text={employeesCount === 0 ? "Aún no has añadido empleados" : "Sin alertas críticas"}
               />
               <AlertPill
                 color="blue"
@@ -238,24 +240,9 @@ export default async function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <TaskRow
-                  title="Añadir empleados"
-                  meta="Completa tu plantilla"
-                  badge="Urgente"
-                  badgeVariant="destructive"
-                />
-                <TaskRow
-                  title="Crear primer run de nómina"
-                  meta="Configura el periodo actual"
-                  badge="Pendiente"
-                  badgeVariant="secondary"
-                />
-                <TaskRow
-                  title="Generar informe anual"
-                  meta="Cuando tengas movimientos"
-                  badge="Programado"
-                  badgeVariant="outline"
-                />
+                <TaskRow title="Añadir empleados" meta="Completa tu plantilla" badge="Urgente" badgeVariant="destructive" />
+                <TaskRow title="Crear primer run de nómina" meta="Configura el periodo actual" badge="Pendiente" badgeVariant="secondary" />
+                <TaskRow title="Generar informe anual" meta="Cuando tengas movimientos" badge="Programado" badgeVariant="outline" />
               </div>
             </CardContent>
           </Card>
@@ -265,21 +252,9 @@ export default async function DashboardPage() {
   );
 }
 
-/* ---------- Componentes auxiliares ---------- */
+/* ---------- Componentes UI ---------- */
 
-function QuickCard({
-  href,
-  icon,
-  title,
-  description,
-  badge,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  badge: string;
-}) {
+function QuickCard({ href, icon, title, description, badge }: { href: string; icon: React.ReactNode; title: string; description: string; badge: string; }) {
   return (
     <Card className="hover:shadow-lg transition-shadow cursor-pointer" asChild>
       <Link href={href}>
@@ -298,15 +273,7 @@ function QuickCard({
   );
 }
 
-function Kpi({
-  label,
-  value,
-  classNameValue,
-}: {
-  label: string;
-  value: string;
-  classNameValue?: string;
-}) {
+function Kpi({ label, value, classNameValue }: { label: string; value: string; classNameValue?: string }) {
   return (
     <div className="text-center p-4 bg-muted/50 rounded-lg">
       <div className={`text-2xl font-bold ${classNameValue ?? ""}`}>{value}</div>
@@ -316,10 +283,8 @@ function Kpi({
 }
 
 function AlertPill({ color, text }: { color: "destructive" | "blue"; text: string }) {
-  const dot =
-    color === "destructive" ? "bg-destructive" : "bg-blue-500";
-  const bg =
-    color === "destructive" ? "bg-destructive/10" : "bg-blue-50";
+  const dot = color === "destructive" ? "bg-destructive" : "bg-blue-500";
+  const bg = color === "destructive" ? "bg-destructive/10" : "bg-blue-50";
   return (
     <div className={`flex items-center space-x-2 p-2 rounded ${bg}`}>
       <div className={`w-2 h-2 rounded-full ${dot}`} />
@@ -328,20 +293,8 @@ function AlertPill({ color, text }: { color: "destructive" | "blue"; text: strin
   );
 }
 
-function ActivityDot({
-  color,
-  title,
-  meta,
-}: {
-  color: "primary" | "secondary" | "muted";
-  title: string;
-  meta: string;
-}) {
-  const map: Record<string, string> = {
-    primary: "bg-primary",
-    secondary: "bg-secondary",
-    muted: "bg-muted-foreground",
-  };
+function ActivityDot({ color, title, meta }: { color: "primary" | "secondary" | "muted"; title: string; meta: string }) {
+  const map: Record<string, string> = { primary: "bg-primary", secondary: "bg-secondary", muted: "bg-muted-foreground" };
   return (
     <div className="flex items-center space-x-3">
       <div className={`w-2 h-2 rounded-full ${map[color]}`} />
@@ -353,24 +306,14 @@ function ActivityDot({
   );
 }
 
-function TaskRow({
-  title,
-  meta,
-  badge,
-  badgeVariant,
-}: {
-  title: string;
-  meta: string;
-  badge: string;
-  badgeVariant: "default" | "secondary" | "destructive" | "outline";
-}) {
+function TaskRow({ title, meta, badge, badgeVariant }: { title: string; meta: string; badge: string; badgeVariant: "default" | "secondary" | "destructive" | "outline"; }) {
   return (
     <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
       <div>
         <p className="text-sm font-medium">{title}</p>
         <p className="text-xs text-muted-foreground">{meta}</p>
       </div>
-      <Badge variant={badgeVariant}>{badge}</Badge>
+        <Badge variant={badgeVariant}>{badge}</Badge>
     </div>
   );
 }
