@@ -1,60 +1,19 @@
+// app/api/diag/route.ts
 import { NextResponse } from "next/server";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
+import { supabaseServer } from "@/lib/supabase/server";
 
 export async function GET() {
-  const supabase = getSupabaseServerClient();
-  const out: any = { env: {}, steps: [] };
+  const supabase = supabaseServer();
 
-  // variables
-  out.env.hasUrl = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
-  out.env.hasKey = !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const { data: profile, error } = await supabase
+    .from("perfil") // ajusta si tu tabla se llama distinto
+    .select("*")
+    .limit(1)
+    .maybeSingle();
 
-  // auth.getUser
-  try {
-    const { data, error } = await supabase.auth.getUser();
-    out.steps.push({
-      name: "auth.getUser",
-      ok: !error,
-      error: error?.message,
-      userId: data?.user?.id ?? null,
-    });
-  } catch (e: any) {
-    out.steps.push({ name: "auth.getUser", ok: false, error: e?.message || String(e) });
+  if (error) {
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  // nominas_employees
-  try {
-    const { data, error } = await supabase
-      .from("nominas_employees")
-      .select("id")
-      .limit(1);
-    out.steps.push({
-      name: "select nominas_employees",
-      ok: !error,
-      error: error?.message,
-      rows: data?.length ?? 0,
-    });
-  } catch (e: any) {
-    out.steps.push({ name: "select nominas_employees", ok: false, error: e?.message || String(e) });
-  }
-
-  // employees fallback
-  try {
-    const { data, error } = await supabase
-      .from("employees")
-      .select("id")
-      .limit(1);
-    out.steps.push({
-      name: "select employees",
-      ok: !error,
-      error: error?.message,
-      rows: data?.length ?? 0,
-    });
-  } catch (e: any) {
-    out.steps.push({ name: "select employees", ok: false, error: e?.message || String(e) });
-  }
-
-  return NextResponse.json(out, { status: 200 });
+  return NextResponse.json({ ok: true, profile });
 }
