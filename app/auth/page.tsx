@@ -1,10 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/browser";
 
 export default function AuthPage() {
-  const sb = supabaseBrowser();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -21,29 +19,36 @@ export default function AuthPage() {
     setErr(null);
     setLoading(true);
     try {
-      const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      window.location.href = nextUrl;
-    } catch (error: any) {
-      setErr(error?.message || "Correo o contraseña incorrectos.");
+      const res = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Correo o contraseña incorrectos");
+      }
+
+      // ✅ la cookie httpOnly ya está fijada por el servidor
+      window.location.replace(nextUrl);
+    } catch (e: any) {
+      setErr(e?.message || "Error de autenticación");
     } finally {
-      setLoading(false); // el botón nunca queda bloqueado
+      setLoading(false);
     }
   }
 
   return (
     <div className="min-h-screen grid place-items-center p-6">
       <div className="w-full max-w-md rounded-2xl border shadow-sm bg-white">
-        {/* Header */}
         <div className="p-6 border-b">
           <div className="flex items-center gap-2">
-            {/* Cambia por tu logo si quieres */}
             <div className="h-8 w-8 rounded-md bg-[#0E7AFE]" />
             <div className="font-semibold">Clientum Nóminas</div>
           </div>
         </div>
 
-        {/* Form */}
         <form onSubmit={onSubmit} className="p-6 space-y-4">
           <div>
             <h1 className="text-xl font-semibold mb-1">Inicia sesión</h1>
@@ -75,7 +80,6 @@ export default function AuthPage() {
                 type="button"
                 onClick={() => setShow((v) => !v)}
                 className="px-3 rounded-md border"
-                aria-label={show ? "Ocultar" : "Mostrar"}
               >
                 {show ? "Ocultar" : "Mostrar"}
               </button>
@@ -84,7 +88,6 @@ export default function AuthPage() {
 
           {err && <p className="text-sm text-red-600">{err}</p>}
 
-          {/* Botón SIEMPRE visible y clicable */}
           <button
             type="submit"
             className="w-full py-2 rounded-md text-white font-medium bg-[#0E7AFE] hover:bg-[#0969d8] transition"
