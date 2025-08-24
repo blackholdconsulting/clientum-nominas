@@ -1,32 +1,37 @@
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
-import { requireUser } from "@/lib/auth";
-import Link from "next/link";
-import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Calculator, Users, FileText, BarChart3, LogOut } from "lucide-react";
+import Link from "next/link"
+import { requireUser } from "@/lib/auth"
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Calculator, Users, FileText, BarChart3, LogOut } from "lucide-react"
 
-/** Carga segura: nunca rompe aunque falte una tabla/vista */
+type Totals = { gross: number; net: number; irpf: number; ss_er: number }
+
 export default async function DashboardPage() {
-  const { supabase, user } = await requireUser();
+  // 1) Autenticación (redirecciona si no hay sesión)
+  const { supabase, user } = await requireUser()
 
-  // --- Empleados (contar) ---
-  let employeesCount = 0;
-  try {
-    const { count } = await supabase
-      .from("nominas_employees")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id);
-    employeesCount = count ?? 0;
-  } catch {}
-
-  // --- Último run ---
+  // 2) Lecturas robustas (nunca lanzar error si faltan tablas/vistas)
+  let employeesCount = 0
   let latestRun:
     | { id: string; period_year: number; period_month: number; status: string }
-    | null = null;
+    | null = null
+  let totals: Totals = { gross: 0, net: 0, irpf: 0, ss_er: 0 }
+  let hasSlipsTable = true
+
+  // Empleados
+  try {
+    const { count } = await supabase
+      .from("nominas_employees") // vista de compatibilidad
+      .select("*", { head: true, count: "exact" })
+      .eq("user_id", user.id)
+    employeesCount = count ?? 0
+  } catch {}
+
+  // Último run
   try {
     const { data } = await supabase
       .from("payroll_runs")
@@ -34,38 +39,35 @@ export default async function DashboardPage() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(1)
-      .maybeSingle();
-    latestRun = data ?? null;
-  } catch {}
+      .maybeSingle()
+    latestRun = data ?? null
+  } catch {
+    latestRun = null
+  }
 
-  // --- Totales del último run ---
-  let totals = { gross: 0, net: 0, irpf: 0, ss_er: 0 };
-  let hasSlipsTable = true;
+  // Totales del último run (si existe)
   if (latestRun?.id) {
     try {
       const { data: slips } = await supabase
         .from("payroll_slips")
         .select("gross, net, irpf, ss_employer")
-        .eq("run_id", latestRun.id);
+        .eq("run_id", latestRun.id)
 
       if (slips?.length) {
-        totals = slips.reduce(
-          (acc: any, r: any) => ({
-            gross: acc.gross + Number(r.gross || 0),
-            net: acc.net + Number(r.net || 0),
-            irpf: acc.irpf + Number(r.irpf || 0),
-            ss_er: acc.ss_er + Number(r.ss_employer || 0),
+        totals = slips.reduce<Totals>(
+          (acc, r: any) => ({
+            gross: acc.gross + Number(r.gross ?? 0),
+            net: acc.net + Number(r.net ?? 0),
+            irpf: acc.irpf + Number(r.irpf ?? 0),
+            ss_er: acc.ss_er + Number(r.ss_employer ?? 0),
           }),
-          { gross: 0, net: 0, irpf: 0, ss_er: 0 }
-        );
+          { gross: 0, net: 0, irpf: 0, ss_er: 0 },
+        )
       }
     } catch {
-      hasSlipsTable = false;
+      hasSlipsTable = false
     }
   }
-
-  const contractsPending = 0;
-  const reportsPending = 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -73,17 +75,13 @@ export default async function DashboardPage() {
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <Calculator className="h-7 w-7 text-primary" />
-                <h1 className="text-2xl font-bold font-serif text-primary">
-                  Clientum Nóminas
-                </h1>
-              </div>
+            <div className="flex items-center space-x-3">
+              <Calculator className="h-7 w-7 text-primary" />
+              <h1 className="text-2xl font-bold font-serif text-primary">Clientum Nóminas</h1>
               <Badge variant="secondary">Dashboard</Badge>
             </div>
 
-            {/* Ajusta a tu logout real cuando quieras */}
+            {/* Ajusta a tu ruta real de logout si la tienes */}
             <form action="/auth?next=%2F" method="get">
               <Button variant="outline" size="sm">
                 <LogOut className="h-4 w-4 mr-2" />
@@ -119,7 +117,7 @@ export default async function DashboardPage() {
             icon={<FileText className="h-8 w-8 text-primary" />}
             title="Contratos"
             description="Contratos pendientes de revisión"
-            badge={String(contractsPending)}
+            badge={"0"}
           />
           <QuickCard
             href="/payroll"
@@ -137,7 +135,7 @@ export default async function DashboardPage() {
             icon={<BarChart3 className="h-8 w-8 text-primary" />}
             title="Informes"
             description="Informes pendientes de generar"
-            badge={String(reportsPending)}
+            badge={"0"}
           />
         </div>
 
@@ -151,16 +149,8 @@ export default async function DashboardPage() {
             <CardContent>
               <div className="grid md:grid-cols-3 gap-4">
                 <Kpi label="Total Bruto" value={`€${totals.gross.toFixed(2)}`} />
-                <Kpi
-                  label="Neto a pagar"
-                  value={`€${totals.net.toFixed(2)}`}
-                  classNameValue="text-green-600"
-                />
-                <Kpi
-                  label="IRPF"
-                  value={`€${totals.irpf.toFixed(2)}`}
-                  classNameValue="text-orange-600"
-                />
+                <Kpi label="Neto a pagar" value={`€${totals.net.toFixed(2)}`} />
+                <Kpi label="IRPF" value={`€${totals.irpf.toFixed(2)}`} />
               </div>
               {!hasSlipsTable && (
                 <p className="text-xs text-muted-foreground mt-3">
@@ -171,192 +161,76 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Alertas del sistema</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <AlertPill
-                color="destructive"
-                text={
-                  employeesCount === 0
-                    ? "Aún no has añadido empleados"
-                    : "Sin alertas críticas"
-                }
-              />
-              <AlertPill
-                color="blue"
-                text={
-                  latestRun
-                    ? `Último run: ${latestRun.period_month}/${latestRun.period_year} (${latestRun.status})`
-                    : "Crea tu primer run de nómina"
-                }
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Actividad + Próximas tareas */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Actividad reciente</CardTitle>
-              <CardDescription>Últimas acciones en el sistema</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <ActivityDot color="primary" title="Login correcto" meta="Ahora" />
-                {latestRun && (
-                  <ActivityDot
-                    color="secondary"
-                    title={`Run ${latestRun.period_month}/${latestRun.period_year} (${latestRun.status})`}
-                    meta="Reciente"
-                  />
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Próximas tareas</CardTitle>
-              <CardDescription>Tareas pendientes importantes</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <TaskRow
-                  title="Añadir empleados"
-                  meta="Completa tu plantilla"
-                  badge="Urgente"
-                  badgeVariant="destructive"
+            <Card>
+              <CardHeader>
+                <CardTitle>Alertas del sistema</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <AlertPill
+                  color="destructive"
+                  text={employeesCount === 0 ? "Aún no has añadido empleados" : "Sin alertas críticas"}
                 />
-                <TaskRow
-                  title="Crear primer run de nómina"
-                  meta="Configura el periodo actual"
-                  badge="Pendiente"
-                  badgeVariant="secondary"
+                <AlertPill
+                  color="blue"
+                  text={
+                    latestRun
+                      ? `Último run: ${latestRun.period_month}/${latestRun.period_year} (${latestRun.status})`
+                      : "Crea tu primer run de nómina"
+                  }
                 />
-                <TaskRow
-                  title="Generar informe anual"
-                  meta="Cuando tengas movimientos"
-                  badge="Programado"
-                  badgeVariant="outline"
-                />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
         </div>
       </main>
     </div>
-  );
+  )
 }
 
-/* ---------- Componentes ---------- */
+/* ---------- Auxiliares ---------- */
 
 function QuickCard({
-  href,
-  icon,
-  title,
-  description,
-  badge,
+  href, icon, title, description, badge,
 }: {
-  href: string;
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  badge: string;
+  href: string
+  icon: React.ReactNode
+  title: string
+  description: string
+  badge: string
 }) {
   return (
-    <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          {icon}
-          <Badge variant="secondary">{badge}</Badge>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <CardTitle className="text-lg">
-          <Link className="hover:underline" href={href}>
-            {title}
-          </Link>
-        </CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardContent>
-    </Card>
-  );
+    <Link href={href}>
+      <Card className="hover:shadow-lg transition-shadow">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            {icon}
+            <Badge variant="secondary">{badge}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <CardTitle className="text-lg">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardContent>
+      </Card>
+    </Link>
+  )
 }
 
-function Kpi({
-  label,
-  value,
-  classNameValue,
-}: {
-  label: string;
-  value: string;
-  classNameValue?: string;
-}) {
+function Kpi({ label, value }: { label: string; value: string }) {
   return (
     <div className="text-center p-4 bg-muted/50 rounded-lg">
-      <div className={`text-2xl font-bold ${classNameValue ?? ""}`}>{value}</div>
+      <div className="text-2xl font-bold">{value}</div>
       <p className="text-sm text-muted-foreground">{label}</p>
     </div>
-  );
+  )
 }
 
 function AlertPill({ color, text }: { color: "destructive" | "blue"; text: string }) {
-  const dot = color === "destructive" ? "bg-destructive" : "bg-blue-500";
-  const bg = color === "destructive" ? "bg-destructive/10" : "bg-blue-50";
+  const dot = color === "destructive" ? "bg-destructive" : "bg-blue-500"
+  const bg = color === "destructive" ? "bg-destructive/10" : "bg-blue-50"
   return (
     <div className={`flex items-center space-x-2 p-2 rounded ${bg}`}>
       <div className={`w-2 h-2 rounded-full ${dot}`} />
       <span className="text-sm">{text}</span>
     </div>
-  );
-}
-
-function ActivityDot({
-  color,
-  title,
-  meta,
-}: {
-  color: "primary" | "secondary" | "muted";
-  title: string;
-  meta: string;
-}) {
-  const map: Record<string, string> = {
-    primary: "bg-primary",
-    secondary: "bg-secondary",
-    muted: "bg-muted-foreground",
-  };
-  return (
-    <div className="flex items-center space-x-3">
-      <div className={`w-2 h-2 rounded-full ${map[color]}`} />
-      <div className="flex-1">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="text-xs text-muted-foreground">{meta}</p>
-      </div>
-    </div>
-  );
-}
-
-function TaskRow({
-  title,
-  meta,
-  badge,
-  badgeVariant,
-}: {
-  title: string;
-  meta: string;
-  badge: string;
-  badgeVariant: "default" | "secondary" | "destructive" | "outline";
-}) {
-  return (
-    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-      <div>
-        <p className="text-sm font-medium">{title}</p>
-        <p className="text-xs text-muted-foreground">{meta}</p>
-      </div>
-      <Badge variant={badgeVariant}>{badge}</Badge>
-    </div>
-  );
+  )
 }
