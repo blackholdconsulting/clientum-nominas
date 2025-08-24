@@ -1,4 +1,3 @@
-// lib/auth.ts
 import { redirect } from "next/navigation";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -13,11 +12,8 @@ export async function softRequireUser() {
   }
 }
 
-/** Redirige a /auth si no hay sesión. No lanza excepciones opacas. */
 export async function hardRequireUser(nextPath: string = "/") {
   const { supabase, user } = await softRequireUser();
-  if (!user) {
-    redirect(`/auth?next=${encodeURIComponent(nextPath)}`);
-  }
+  if (!user) redirect(`/auth?next=${encodeURIComponent(nextPath)}`);
   return { supabase, user };
 }
