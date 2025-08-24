@@ -1,7 +1,13 @@
+// app/contracts/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import {
+  Calculator, Plus, Search, Filter, FileText, Calendar,
+  AlertTriangle, CheckCircle, Clock, Eye
+} from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,109 +15,140 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import {
-  Calculator,
-  Plus,
-  Search,
-  Filter,
-  FileText,
-  Calendar,
-  AlertTriangle,
-  CheckCircle,
-  Clock,
-  Edit,
-  Eye,
-  Info,
-} from "lucide-react";
+import type { Contract, ContractStatus, ContractType } from "@/types/contracts";
 
-type UiContract = {
-  id: string;
-  employeeId: string | null;
-  employeeName: string;
-  contractType: string | null;
-  position: string | null;
-  department: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  salary: number | null;
-  status: string | null;
-  renewalDate: string | null;
-  createdDate: string | null;
-  lastModified: string | null;
-};
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { auth: { persistSession: true, autoRefreshToken: true } }
+);
+
+type Employee = { id: string; full_name: string };
+
+const CONTRACT_TYPES: ContractType[] = [
+  "Indefinido",
+  "Temporal",
+  "Formación",
+  "Prácticas",
+  "Fijo-discontinuo",
+];
+
+function statusIcon(status: ContractStatus) {
+  if (status === "Activo") return <CheckCircle className="h-4 w-4 text-green-500" />;
+  if (status === "Próximo a Vencer") return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
+  return <Clock className="h-4 w-4 text-gray-500" />;
+}
+
+function statusVariant(status: ContractStatus): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "Activo") return "default";
+  if (status === "Próximo a Vencer") return "destructive";
+  return "secondary";
+}
 
 export default function ContractsPage() {
-  const [contracts, setContracts] = useState<UiContract[]>([]);
-  const [note, setNote] = useState<string | undefined>(undefined);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isPending, startTransition] = useTransition();
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  // filtros
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | ContractType>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | ContractStatus>("all");
+
+  // formulario rápido crear contrato
+  const [newEmployeeId, setNewEmployeeId] = useState<string>("");
+  const [newType, setNewType] = useState<ContractType>("Indefinido");
+  const [newStart, setNewStart] = useState<string>("");
 
   useEffect(() => {
-    let ab = new AbortController();
     (async () => {
-      try {
-        const res = await fetch("/api/contracts", { signal: ab.signal });
-        if (!res.ok) throw new Error(await res.text());
-        const payload = (await res.json()) as { rows: UiContract[]; note?: string };
-        setContracts(payload.rows || []);
-        setNote(payload.note);
-      } catch (e: any) {
-        setNote(e?.message || "No se pudieron cargar los contratos.");
-        setContracts([]);
+      setLoading(true);
+      // 1) traer empleado(s) del usuario (RLS ya filtra por auth.uid())
+      const { data: emp, error: empErr } = await supabase
+        .from("employees")
+        .select("id, first_name, last_name")
+        .order("created_at", { ascending: true });
+
+      if (!empErr) {
+        const mapped = (emp || []).map((e) => ({
+          id: e.id,
+          full_name: `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim() || "Empleado",
+        }));
+        setEmployees(mapped);
       }
+
+      // 2) traer contratos del usuario
+      const { data: ctr, error } = await supabase
+        .from("contracts")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (!error) setContracts((ctr as Contract[]) || []);
+      setLoading(false);
     })();
-    return () => ab.abort();
   }, []);
 
-  const filteredContracts = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
+  const filtered = useMemo(() => {
     return contracts.filter((c) => {
-      const matchesSearch =
-        !term ||
-        (c.employeeName ?? "").toLowerCase().includes(term) ||
-        (c.position ?? "").toLowerCase().includes(term) ||
-        (c.department ?? "").toLowerCase().includes(term);
+      const hayBusqueda =
+        c.employee_name.toLowerCase().includes(search.toLowerCase()) ||
+        (c.position ?? "").toLowerCase().includes(search.toLowerCase()) ||
+        (c.department ?? "").toLowerCase().includes(search.toLowerCase());
 
-      const matchesType = typeFilter === "all" || c.contractType === typeFilter;
-      const matchesStatus = statusFilter === "all" || c.status === statusFilter;
+      const okTipo = typeFilter === "all" || c.contract_type === typeFilter;
+      const okEstado = statusFilter === "all" || c.status === statusFilter;
 
-      return matchesSearch && matchesType && matchesStatus;
+      return hayBusqueda && okTipo && okEstado;
     });
-  }, [contracts, searchTerm, typeFilter, statusFilter]);
+  }, [contracts, search, typeFilter, statusFilter]);
 
-  const activeContracts = useMemo(() => contracts.filter((c) => c.status === "Activo").length, [contracts]);
-  const expiringContracts = useMemo(
-    () => contracts.filter((c) => c.status === "Próximo a Vencer").length,
-    [contracts]
-  );
+  const active = contracts.filter((c) => c.status === "Activo").length;
+  const expiring = contracts.filter((c) => c.status === "Próximo a Vencer").length;
+  const tipos = Array.from(new Set(contracts.map((c) => c.contract_type)));
 
-  const getStatusIcon = (status: string | null) => {
-    switch (status) {
-      case "Activo":
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case "Próximo a Vencer":
-        return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
-      case "Finalizado":
-        return <Clock className="h-4 w-4 text-gray-500" />;
-      default:
-        return <Clock className="h-4 w-4 text-gray-500" />;
-    }
-  };
+  async function createContract() {
+    if (!newEmployeeId || !newStart) return;
 
-  const getStatusVariant = (status: string | null) => {
-    switch (status) {
-      case "Activo":
-        return "default";
-      case "Próximo a Vencer":
-        return "destructive";
-      case "Finalizado":
-        return "secondary";
-      default:
-        return "outline";
-    }
-  };
+    // obtener nombre del empleado para denormalizar (UX rápido)
+    const emp = employees.find((e) => e.id === newEmployeeId);
+    const employeeName = emp?.full_name ?? "Empleado";
+
+    startTransition(async () => {
+      const { data: user } = await supabase.auth.getUser();
+      const userId = user.user?.id;
+      if (!userId) return;
+
+      const { data, error } = await supabase
+        .from("contracts")
+        .insert({
+          user_id: userId,
+          employee_id: newEmployeeId,
+          employee_name: employeeName,
+          contract_type: newType,
+          start_date: newStart,
+          status: "Activo",
+          payload: {},
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        setContracts((prev) => [data as Contract, ...prev]);
+        setNewEmployeeId("");
+        setNewStart("");
+        setNewType("Indefinido");
+      }
+    });
+  }
+
+  if (loading) {
+    return (
+      <div className="p-8 text-muted-foreground">
+        Cargando contratos…
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -126,29 +163,65 @@ export default function ContractsPage() {
               </Link>
               <Badge variant="secondary">Contratos</Badge>
             </div>
-            <Button asChild>
-              <Link href="/contracts/new">
-                <Plus className="h-4 w-4 mr-2" />
-                Nuevo Contrato
-              </Link>
-            </Button>
+            <div className="flex gap-2">
+              <Button asChild variant="outline">
+                <Link href="/contracts/models">
+                  <FileText className="h-4 w-4 mr-2" />
+                  Modelos
+                </Link>
+              </Button>
+            </div>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        {/* Nota */}
-        {note && (
-          <Card className="mb-6">
-            <CardHeader className="flex flex-row items-center gap-2">
-              <Info className="h-5 w-5 text-muted-foreground" />
-              <CardTitle>Información</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <p className="text-sm text-muted-foreground">{note}</p>
-            </CardContent>
-          </Card>
-        )}
+        {/* Nuevo contrato rápido */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Crear contrato</CardTitle>
+            <CardDescription>Genera un contrato básico y complétalo después con el modelo oficial.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid md:grid-cols-4 gap-4">
+            <Select value={newEmployeeId} onValueChange={setNewEmployeeId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Empleado" />
+              </SelectTrigger>
+              <SelectContent>
+                {employees.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.full_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={newType} onValueChange={(v: ContractType) => setNewType(v)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Tipo de contrato" />
+              </SelectTrigger>
+              <SelectContent>
+                {CONTRACT_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Input
+              type="date"
+              value={newStart}
+              onChange={(e) => setNewStart(e.target.value)}
+              placeholder="Inicio"
+            />
+
+            <Button disabled={isPending || !newEmployeeId || !newStart} onClick={createContract}>
+              <Plus className="h-4 w-4 mr-2" />
+              Crear
+            </Button>
+          </CardContent>
+        </Card>
 
         {/* Stats */}
         <div className="grid md:grid-cols-4 gap-6 mb-8">
@@ -169,11 +242,11 @@ export default function ContractsPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CheckCircle className="h-8 w-8 text-green-500" />
-                <Badge variant="secondary">{activeContracts}</Badge>
+                <Badge variant="secondary">{active}</Badge>
               </div>
             </CardHeader>
             <CardContent>
-              <CardTitle className="text-2xl">{activeContracts}</CardTitle>
+              <CardTitle className="text-2xl">{active}</CardTitle>
               <CardDescription>Contratos Activos</CardDescription>
             </CardContent>
           </Card>
@@ -182,11 +255,11 @@ export default function ContractsPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <AlertTriangle className="h-8 w-8 text-yellow-500" />
-                <Badge variant="destructive">{expiringContracts}</Badge>
+                <Badge variant="destructive">{expiring}</Badge>
               </div>
             </CardHeader>
             <CardContent>
-              <CardTitle className="text-2xl">{expiringContracts}</CardTitle>
+              <CardTitle className="text-2xl">{expiring}</CardTitle>
               <CardDescription>Próximos a Vencer</CardDescription>
             </CardContent>
           </Card>
@@ -195,15 +268,11 @@ export default function ContractsPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <Filter className="h-8 w-8 text-primary" />
-                <Badge variant="secondary">
-                  {Array.from(new Set(contracts.map((c) => c.contractType).filter(Boolean))).length}
-                </Badge>
+                <Badge variant="secondary">{tipos.length}</Badge>
               </div>
             </CardHeader>
             <CardContent>
-              <CardTitle className="text-2xl">
-                {Array.from(new Set(contracts.map((c) => c.contractType).filter(Boolean))).length}
-              </CardTitle>
+              <CardTitle className="text-2xl">{tipos.length}</CardTitle>
               <CardDescription>Tipos de Contrato</CardDescription>
             </CardContent>
           </Card>
@@ -212,54 +281,50 @@ export default function ContractsPage() {
         {/* Filtros */}
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Filtros y Búsqueda</CardTitle>
+            <CardTitle>Filtros y búsqueda</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar por empleado, puesto o departamento..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </div>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="w-full md:w-48">
-                  <SelectValue placeholder="Tipo de contrato" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los tipos</SelectItem>
-                  {Array.from(new Set(contracts.map((c) => c.contractType).filter(Boolean))).map((t) => (
-                    <SelectItem key={String(t)} value={String(t)}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full md:w-48">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="Activo">Activo</SelectItem>
-                  <SelectItem value="Próximo a Vencer">Próximo a Vencer</SelectItem>
-                  <SelectItem value="Finalizado">Finalizado</SelectItem>
-                </SelectContent>
-              </Select>
+          <CardContent className="flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por empleado, puesto o departamento…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-10"
+              />
             </div>
+            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as any)}>
+              <SelectTrigger className="md:w-56">
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {CONTRACT_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+              <SelectTrigger className="md:w-56">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="Activo">Activo</SelectItem>
+                <SelectItem value="Próximo a Vencer">Próximo a Vencer</SelectItem>
+                <SelectItem value="Finalizado">Finalizado</SelectItem>
+              </SelectContent>
+            </Select>
           </CardContent>
         </Card>
 
         {/* Tabla */}
         <Card>
           <CardHeader>
-            <CardTitle>Lista de Contratos ({filteredContracts.length})</CardTitle>
-            <CardDescription>Información detallada de todos los contratos</CardDescription>
+            <CardTitle>Lista de contratos ({filtered.length})</CardTitle>
+            <CardDescription>Información detallada</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -275,78 +340,89 @@ export default function ContractsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredContracts.map((c) => (
+                  {filtered.map((c) => (
                     <TableRow key={c.id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar>
-                            <AvatarImage src={`/abstract-geometric-shapes.png?height=40&width=40&query=${c.employeeName}`} />
+                            <AvatarImage src={`/abstract-geometric-shapes.png?height=40&width=40&seed=${c.employee_name}`} />
                             <AvatarFallback>
-                              {c.employeeName
-                                .split(" ")
-                                .map((n) => n[0])
-                                .join("")
-                                .slice(0, 2)}
+                              {c.employee_name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
                             </AvatarFallback>
                           </Avatar>
                           <div>
-                            <p className="font-medium">{c.employeeName}</p>
-                            <p className="text-sm text-muted-foreground">{c.position ?? "—"}</p>
-                            <p className="text-xs text-muted-foreground">{c.department ?? "—"}</p>
+                            <p className="font-medium">{c.employee_name}</p>
+                            {c.position && <p className="text-sm text-muted-foreground">{c.position}</p>}
+                            {c.department && <p className="text-xs text-muted-foreground">{c.department}</p>}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{c.contractType ?? "—"}</Badge>
+                        <Badge variant="outline">{c.contract_type}</Badge>
                       </TableCell>
                       <TableCell>
                         <div className="space-y-1 text-sm">
                           <div className="flex items-center">
                             <Calendar className="h-3 w-3 mr-1 text-muted-foreground" />
-                            <span>Inicio: {c.startDate ? new Date(c.startDate).toLocaleDateString("es-ES") : "—"}</span>
+                            Inicio: {new Date(c.start_date).toLocaleDateString("es-ES")}
                           </div>
-                          {c.endDate && (
+                          {c.end_date && (
                             <div className="flex items-center text-muted-foreground">
                               <Calendar className="h-3 w-3 mr-1" />
-                              <span>Fin: {new Date(c.endDate).toLocaleDateString("es-ES")}</span>
+                              Fin: {new Date(c.end_date).toLocaleDateString("es-ES")}
                             </div>
                           )}
-                          {c.renewalDate && (
+                          {c.renewal_date && (
                             <div className="flex items-center text-yellow-600">
                               <AlertTriangle className="h-3 w-3 mr-1" />
-                              <span>Renovar: {new Date(c.renewalDate).toLocaleDateString("es-ES")}</span>
+                              Renovar: {new Date(c.renewal_date).toLocaleDateString("es-ES")}
                             </div>
                           )}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="font-medium">
-                          {typeof c.salary === "number" ? `${c.salary.toLocaleString()}€` : "—"}
-                        </span>
-                        <p className="text-sm text-muted-foreground">anual</p>
+                        {c.salary != null ? (
+                          <>
+                            <span className="font-medium">
+                              {Number(c.salary).toLocaleString("es-ES")} €
+                            </span>
+                            <p className="text-sm text-muted-foreground">anual</p>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          {getStatusIcon(c.status)}
-                          <Badge variant={(getStatusVariant(c.status) as any) ?? "outline"}>{c.status ?? "—"}</Badge>
+                          {statusIcon(c.status)}
+                          <Badge variant={statusVariant(c.status)}>{c.status}</Badge>
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <Button variant="ghost" size="sm" asChild>
+                          <Button asChild variant="ghost" size="sm">
                             <Link href={`/contracts/${c.id}`}>
-                              <Eye className="h-4 w-4" />
+                              <Eye className="h-4 w-4 mr-1" />
+                              Ver
                             </Link>
                           </Button>
-                          <Button variant="ghost" size="sm" asChild>
-                            <Link href={`/contracts/${c.id}/edit`}>
-                              <Edit className="h-4 w-4" />
+                          <Button asChild variant="outline" size="sm">
+                            <Link href={`/contracts/${c.id}/fill`}>
+                              <FileText className="h-4 w-4 mr-1" />
+                              Modelo
                             </Link>
                           </Button>
                         </div>
                       </TableCell>
                     </TableRow>
                   ))}
+                  {filtered.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        Sin resultados
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
