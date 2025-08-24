@@ -1,7 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useParams } from "next/navigation"
+import { createClient } from "@supabase/supabase-js"
+
 import { AuthProvider } from "@/components/auth/auth-provider"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { Button } from "@/components/ui/button"
@@ -25,82 +27,145 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 
-// Mock contract data (expanded from contracts page)
-const mockContracts = [
-  {
-    id: "1",
-    employeeId: "1",
-    employeeName: "María García López",
-    contractType: "Indefinido",
-    position: "Desarrolladora Senior",
-    department: "Tecnología",
-    startDate: "2022-03-15",
-    endDate: null,
-    salary: 45000,
-    salaryType: "anual",
-    status: "Activo",
-    renewalDate: null,
-    createdDate: "2022-03-01",
-    lastModified: "2022-03-10",
-    probationPeriod: 6,
-    workingHours: 40,
-    vacationDays: 22,
-    workLocation: "Madrid, España",
-    noticePeriod: 15,
-    benefits: ["Seguro médico privado", "Ticket restaurante", "Teletrabajo", "Horario flexible"],
-    renewalClause: false,
-    confidentialityClause: true,
-    nonCompeteClause: false,
-    additionalClauses: "El empleado tendrá acceso a formación continua en tecnologías emergentes.",
-  },
-  {
-    id: "2",
-    employeeId: "2",
-    employeeName: "Juan Martínez Ruiz",
-    contractType: "Indefinido",
-    position: "Gerente de Ventas",
-    department: "Ventas",
-    startDate: "2021-01-10",
-    endDate: null,
-    salary: 52000,
-    salaryType: "anual",
-    status: "Activo",
-    renewalDate: null,
-    createdDate: "2020-12-15",
-    lastModified: "2021-01-05",
-    probationPeriod: 3,
-    workingHours: 40,
-    vacationDays: 25,
-    workLocation: "Barcelona, España",
-    noticePeriod: 30,
-    benefits: ["Seguro médico privado", "Coche de empresa", "Bonus por objetivos"],
-    renewalClause: false,
-    confidentialityClause: true,
-    nonCompeteClause: true,
-    additionalClauses: "Objetivos de ventas trimestrales con bonus del 10% sobre el salario base.",
-  },
-]
+type DbContract = {
+  id: string
+  user_id: string
+  employee_id: string
+  template: string | null
+  data: any // jsonb: guardamos campos del formulario
+  status: "borrador" | "firmado" | "archivado"
+  pdf_url: string | null
+  created_at: string
+  updated_at: string
+  employees?: {
+    first_name: string | null
+    last_name: string | null
+    position: string | null
+    department: string | null
+    salary: number | null
+    hired_at: string | null
+    work_location: string | null
+    weekly_hours?: number | null
+    vacation_days?: number | null
+    notice_days?: number | null
+  } | null
+}
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+function StatusIcon({ s }: { s: string }) {
+  if (s === "firmado") return <CheckCircle className="h-5 w-5 text-green-500" />
+  if (s === "borrador") return <Clock className="h-5 w-5 text-gray-500" />
+  return <AlertTriangle className="h-5 w-5 text-yellow-500" />
+}
+
+function statusBadgeVariant(s: string) {
+  if (s === "firmado") return "default"
+  if (s === "archivado") return "secondary"
+  return "outline"
+}
 
 function ContractDetailContent() {
-  const params = useParams()
-  const [contract, setContract] = useState<any>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const params = useParams<{ id: string }>()
+  const [row, setRow] = useState<DbContract | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Mock API call to fetch contract data
-    const fetchContract = async () => {
-      setIsLoading(true)
-      await new Promise((resolve) => setTimeout(resolve, 500)) // Simulate API delay
+    const load = async () => {
+      try {
+        setLoading(true)
+        setError(null)
 
-      const foundContract = mockContracts.find((contract) => contract.id === params.id)
-      setContract(foundContract)
-      setIsLoading(false)
+        // garantizamos sesión (RLS hará el resto)
+        const { data: auth } = await supabase.auth.getUser()
+        if (!auth.user) {
+          // el ProtectedRoute ya lo controla, pero por si acaso
+          setError("No autenticado")
+          setLoading(false)
+          return
+        }
+
+        // Traemos el contrato + datos del empleado (FK employee_id)
+        const { data, error } = await supabase
+          .from("contracts")
+          .select(
+            `
+              id, user_id, employee_id, template, data, status, pdf_url, created_at, updated_at,
+              employees:employee_id (
+                first_name, last_name, position, department, salary, hired_at, work_location, weekly_hours, vacation_days, notice_days
+              )
+            `
+          )
+          .eq("id", params.id)
+          .single()
+
+        if (error) throw error
+        setRow(data as unknown as DbContract)
+      } catch (e: any) {
+        setError(e?.message ?? "Error desconocido")
+      } finally {
+        setLoading(false)
+      }
     }
 
-    fetchContract()
+    load()
   }, [params.id])
 
-  if (isLoading) {
+  const ui = useMemo(() => {
+    if (!row) return null
+
+    const e = row.employees
+    const fullName =
+      (e?.first_name ?? "") + (e?.last_name ? ` ${e?.last_name}` : "") || row.data?.employee_name || "Empleado"
+
+    // algunos campos vienen del json `data` (porque cada plantilla puede guardar cosas distintas)
+    const position = e?.position ?? row.data?.position ?? "—"
+    const department = e?.department ?? row.data?.department ?? "—"
+    const startDate =
+      row.data?.start_date ??
+      e?.hired_at ??
+      row.created_at // fallback
+    const endDate = row.data?.end_date ?? null
+
+    const workingHours = e?.weekly_hours ?? row.data?.working_hours ?? 40
+    const vacationDays = e?.vacation_days ?? row.data?.vacation_days ?? 22
+    const noticeDays = e?.notice_days ?? row.data?.notice_days ?? 15
+    const workLocation = e?.work_location ?? row.data?.work_location ?? "—"
+
+    const salary = e?.salary ?? row.data?.salary ?? 0
+    const salaryType = row.data?.salary_type ?? "anual"
+
+    const benefits: string[] = row.data?.benefits ?? []
+
+    return {
+      id: row.id,
+      status: row.status,
+      createdDate: row.created_at,
+      lastModified: row.updated_at,
+      employeeName: fullName,
+      position,
+      department,
+      startDate,
+      endDate,
+      workingHours,
+      vacationDays,
+      noticeDays,
+      workLocation,
+      salary,
+      salaryType,
+      benefits,
+      renewalClause: !!row.data?.renewal_clause,
+      confidentialityClause: !!row.data?.confidentiality_clause,
+      nonCompeteClause: !!row.data?.non_compete_clause,
+      additionalClauses: row.data?.additional_clauses ?? "",
+    }
+  }, [row])
+
+  if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="w-full max-w-md">
@@ -113,14 +178,14 @@ function ContractDetailContent() {
     )
   }
 
-  if (!contract) {
+  if (error || !ui) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center justify-center p-8">
             <h2 className="text-xl font-semibold mb-2">Contrato no encontrado</h2>
             <p className="text-muted-foreground text-center mb-4">
-              El contrato que buscas no existe o ha sido eliminado.
+              {error ?? "El contrato que buscas no existe o ha sido eliminado."}
             </p>
             <Button asChild>
               <Link href="/contracts">Volver a Contratos</Link>
@@ -129,32 +194,6 @@ function ContractDetailContent() {
         </Card>
       </div>
     )
-  }
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "Activo":
-        return <CheckCircle className="h-5 w-5 text-green-500" />
-      case "Próximo a Vencer":
-        return <AlertTriangle className="h-5 w-5 text-yellow-500" />
-      case "Finalizado":
-        return <Clock className="h-5 w-5 text-gray-500" />
-      default:
-        return <Clock className="h-5 w-5 text-gray-500" />
-    }
-  }
-
-  const getStatusVariant = (status: string) => {
-    switch (status) {
-      case "Activo":
-        return "default"
-      case "Próximo a Vencer":
-        return "destructive"
-      case "Finalizado":
-        return "secondary"
-      default:
-        return "outline"
-    }
   }
 
   return (
@@ -177,12 +216,18 @@ function ContractDetailContent() {
                   Volver
                 </Link>
               </Button>
-              <Button variant="outline">
-                <Download className="h-4 w-4 mr-2" />
-                Descargar PDF
-              </Button>
+
+              {row.pdf_url && (
+                <Button asChild variant="outline">
+                  <a href={row.pdf_url} target="_blank" rel="noreferrer">
+                    <Download className="h-4 w-4 mr-2" />
+                    Descargar PDF
+                  </a>
+                </Button>
+              )}
+
               <Button asChild>
-                <Link href={`/contracts/${contract.id}/edit`}>
+                <Link href={`/contracts/${ui.id}/edit`}>
                   <Edit className="h-4 w-4 mr-2" />
                   Editar
                 </Link>
@@ -198,9 +243,9 @@ function ContractDetailContent() {
           <CardContent className="p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center space-y-4 md:space-y-0 md:space-x-6">
               <Avatar className="h-20 w-20">
-                <AvatarImage src={`/abstract-geometric-shapes.png?height=80&width=80&query=${contract.employeeName}`} />
+                <AvatarImage src={`/abstract-geometric-shapes.png?height=80&width=80&query=${ui.employeeName}`} />
                 <AvatarFallback className="text-xl">
-                  {contract.employeeName
+                  {ui.employeeName
                     .split(" ")
                     .map((n: string) => n[0])
                     .join("")
@@ -211,37 +256,37 @@ function ContractDetailContent() {
               <div className="flex-1">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4">
                   <div>
-                    <h2 className="text-3xl font-bold font-serif">{contract.employeeName}</h2>
-                    <p className="text-xl text-muted-foreground">{contract.position}</p>
-                    <p className="text-sm text-muted-foreground">{contract.department}</p>
+                    <h2 className="text-3xl font-bold font-serif">{ui.employeeName}</h2>
+                    <p className="text-xl text-muted-foreground">{ui.position}</p>
+                    <p className="text-sm text-muted-foreground">{ui.department}</p>
                   </div>
                   <div className="flex items-center space-x-2 mt-2 md:mt-0">
-                    {getStatusIcon(contract.status)}
-                    <Badge variant={getStatusVariant(contract.status) as any}>{contract.status}</Badge>
-                    <Badge variant="outline">{contract.contractType}</Badge>
+                    <StatusIcon s={row.status} />
+                    <Badge variant={statusBadgeVariant(row.status) as any}>{row.status}</Badge>
+                    {/* Tipo de contrato desde plantilla (si quieres, léelo desde row.template) */}
                   </div>
                 </div>
 
                 <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                   <div className="flex items-center space-x-2">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span>Inicio: {new Date(contract.startDate).toLocaleDateString("es-ES")}</span>
+                    <span>Inicio: {new Date(ui.startDate).toLocaleDateString("es-ES")}</span>
                   </div>
-                  {contract.endDate && (
+                  {ui.endDate && (
                     <div className="flex items-center space-x-2">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <span>Fin: {new Date(contract.endDate).toLocaleDateString("es-ES")}</span>
+                      <span>Fin: {new Date(ui.endDate).toLocaleDateString("es-ES")}</span>
                     </div>
                   )}
                   <div className="flex items-center space-x-2">
                     <Euro className="h-4 w-4 text-muted-foreground" />
                     <span>
-                      {contract.salary.toLocaleString()}€ {contract.salaryType}
+                      {Number(ui.salary ?? 0).toLocaleString()}€ {ui.salaryType}
                     </span>
                   </div>
                   <div className="flex items-center space-x-2">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
-                    <span>{contract.workLocation}</span>
+                    <span>{ui.workLocation}</span>
                   </div>
                 </div>
               </div>
@@ -249,7 +294,7 @@ function ContractDetailContent() {
           </CardContent>
         </Card>
 
-        {/* Contract Details Tabs */}
+        {/* Tabs */}
         <Tabs defaultValue="terms" className="space-y-6">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="terms">Términos</TabsTrigger>
@@ -271,23 +316,27 @@ function ContractDetailContent() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Fecha de Inicio</p>
-                      <p className="font-medium">{new Date(contract.startDate).toLocaleDateString("es-ES")}</p>
+                      <p className="font-medium">
+                        {new Date(ui.startDate).toLocaleDateString("es-ES")}
+                      </p>
                     </div>
-                    {contract.endDate && (
+                    {ui.endDate && (
                       <div>
                         <p className="text-sm font-medium text-muted-foreground">Fecha de Fin</p>
-                        <p className="font-medium">{new Date(contract.endDate).toLocaleDateString("es-ES")}</p>
+                        <p className="font-medium">
+                          {new Date(ui.endDate).toLocaleDateString("es-ES")}
+                        </p>
                       </div>
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Período de Prueba</p>
-                      <p className="font-medium">{contract.probationPeriod} meses</p>
+                      <p className="font-medium">{ui.noticeDays ?? 15} días</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Preaviso</p>
-                      <p className="font-medium">{contract.noticePeriod} días</p>
+                      <p className="font-medium">{ui.noticeDays ?? 15} días</p>
                     </div>
                   </div>
                 </CardContent>
@@ -304,16 +353,16 @@ function ContractDetailContent() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Horas Semanales</p>
-                      <p className="font-medium">{contract.workingHours} horas</p>
+                      <p className="font-medium">{ui.workingHours} horas</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Días de Vacaciones</p>
-                      <p className="font-medium">{contract.vacationDays} días</p>
+                      <p className="font-medium">{ui.vacationDays} días</p>
                     </div>
                   </div>
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Lugar de Trabajo</p>
-                    <p className="font-medium">{contract.workLocation}</p>
+                    <p className="font-medium">{ui.workLocation}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -331,19 +380,28 @@ function ContractDetailContent() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <p className="text-sm font-medium text-muted-foreground">Salario {contract.salaryType}</p>
-                    <p className="text-3xl font-bold">{contract.salary.toLocaleString()}€</p>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Salario {ui.salaryType}
+                    </p>
+                    <p className="text-3xl font-bold">
+                      {Number(ui.salary ?? 0).toLocaleString()}€
+                    </p>
                   </div>
                   <Separator />
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Salario Mensual</p>
-                      <p className="font-medium">{Math.round(contract.salary / 12).toLocaleString()}€</p>
+                      <p className="font-medium">
+                        {Math.round((Number(ui.salary ?? 0)) / 12).toLocaleString()}€
+                      </p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Salario por Hora</p>
                       <p className="font-medium">
-                        {Math.round(contract.salary / (52 * contract.workingHours)).toLocaleString()}€
+                        {Math.round(
+                          (Number(ui.salary ?? 0)) / (52 * (ui.workingHours || 40))
+                        ).toLocaleString()}
+                        €
                       </p>
                     </div>
                   </div>
@@ -355,17 +413,17 @@ function ContractDetailContent() {
                   <CardTitle>Beneficios Adicionales</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {contract.benefits.length > 0 ? (
+                  {ui.benefits?.length ? (
                     <div className="space-y-2">
-                      {contract.benefits.map((benefit: string, index: number) => (
-                        <div key={index} className="flex items-center space-x-2">
+                      {ui.benefits.map((b: string, i: number) => (
+                        <div key={i} className="flex items-center space-x-2">
                           <CheckCircle className="h-4 w-4 text-green-500" />
-                          <span className="text-sm">{benefit}</span>
+                          <span className="text-sm">{b}</span>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-muted-foreground">No hay beneficios adicionales especificados.</p>
+                    <p className="text-muted-foreground">No hay beneficios adicionales.</p>
                   )}
                 </CardContent>
               </Card>
@@ -385,20 +443,20 @@ function ContractDetailContent() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm">Renovación automática</span>
-                      <Badge variant={contract.renewalClause ? "default" : "secondary"}>
-                        {contract.renewalClause ? "Sí" : "No"}
+                      <Badge variant={row.data?.renewal_clause ? "default" : "secondary"}>
+                        {row.data?.renewal_clause ? "Sí" : "No"}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm">Confidencialidad</span>
-                      <Badge variant={contract.confidentialityClause ? "default" : "secondary"}>
-                        {contract.confidentialityClause ? "Sí" : "No"}
+                      <Badge variant={row.data?.confidentiality_clause ? "default" : "secondary"}>
+                        {row.data?.confidentiality_clause ? "Sí" : "No"}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm">No competencia</span>
-                      <Badge variant={contract.nonCompeteClause ? "default" : "secondary"}>
-                        {contract.nonCompeteClause ? "Sí" : "No"}
+                      <Badge variant={row.data?.non_compete_clause ? "default" : "secondary"}>
+                        {row.data?.non_compete_clause ? "Sí" : "No"}
                       </Badge>
                     </div>
                   </div>
@@ -410,10 +468,10 @@ function ContractDetailContent() {
                   <CardTitle>Cláusulas Adicionales</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {contract.additionalClauses ? (
-                    <p className="text-sm leading-relaxed">{contract.additionalClauses}</p>
+                  {ui.additionalClauses ? (
+                    <p className="text-sm leading-relaxed">{ui.additionalClauses}</p>
                   ) : (
-                    <p className="text-muted-foreground">No hay cláusulas adicionales especificadas.</p>
+                    <p className="text-muted-foreground">No hay cláusulas adicionales.</p>
                   )}
                 </CardContent>
               </Card>
@@ -432,29 +490,29 @@ function ContractDetailContent() {
               <CardContent>
                 <div className="space-y-4">
                   <div className="flex items-start space-x-3">
-                    <div className="w-2 h-2 bg-primary rounded-full mt-2"></div>
+                    <div className="w-2 h-2 bg-primary rounded-full mt-2" />
                     <div className="flex-1">
                       <p className="text-sm font-medium">Contrato creado</p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(contract.createdDate).toLocaleDateString("es-ES")}
+                        {new Date(ui.createdDate).toLocaleDateString("es-ES")}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-start space-x-3">
-                    <div className="w-2 h-2 bg-secondary rounded-full mt-2"></div>
+                    <div className="w-2 h-2 bg-secondary rounded-full mt-2" />
                     <div className="flex-1">
                       <p className="text-sm font-medium">Última modificación</p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(contract.lastModified).toLocaleDateString("es-ES")}
+                        {new Date(ui.lastModified).toLocaleDateString("es-ES")}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-start space-x-3">
-                    <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
+                    <div className="w-2 h-2 bg-green-500 rounded-full mt-2" />
                     <div className="flex-1">
                       <p className="text-sm font-medium">Contrato activado</p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(contract.startDate).toLocaleDateString("es-ES")}
+                        {new Date(ui.startDate).toLocaleDateString("es-ES")}
                       </p>
                     </div>
                   </div>
