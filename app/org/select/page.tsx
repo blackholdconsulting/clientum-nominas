@@ -10,7 +10,7 @@ export default async function OrgSelectPage() {
   const user = await requireUser();
   const supabase = supabaseServer();
 
-  // Ejemplo: listar organizaciones (ajusta a tu esquema real)
+  // Ajusta a tu esquema real
   const { data: orgs, error } = await supabase
     .from("orgs")
     .select("id, name")
@@ -34,7 +34,7 @@ export default async function OrgSelectPage() {
           <li key={o.id} className="border rounded-md p-4 flex items-center justify-between">
             <span className="font-medium">{o.name}</span>
             <Link
-              href={`/`}
+              href="/"
               className="inline-flex items-center rounded-md bg-emerald-700 text-white px-4 py-2 hover:bg-emerald-800"
             >
               Entrar
