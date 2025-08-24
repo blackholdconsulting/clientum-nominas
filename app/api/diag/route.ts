@@ -1,19 +1,27 @@
 // app/api/diag/route.ts
-import { NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabase/server";
+import { NextResponse } from 'next/server';
+import { supabaseServer } from '@/lib/supabase/server';
 
 export async function GET() {
-  const supabase = supabaseServer();
+  try {
+    const supabase = supabaseServer();
+    const { data: { user }, error } = await supabase.auth.getUser();
 
-  const { data: profile, error } = await supabase
-    .from("perfil") // ajusta si tu tabla se llama distinto
-    .select("*")
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({
+      ok: true,
+      env: {
+        url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+        anon: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      },
+      user: user
+        ? { id: user.id, email: user.email }
+        : null,
+      authError: error?.message ?? null,
+    });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? String(e) },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ ok: true, profile });
 }
