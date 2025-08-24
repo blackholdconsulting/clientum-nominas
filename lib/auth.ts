@@ -5,18 +5,18 @@ import { supabaseServer } from "@/lib/supabase/server";
 /** Devuelve el usuario autenticado o redirige a /auth si no hay sesión */
 export async function requireUser() {
   const supabase = supabaseServer();
-  const { data: { user }, error } = await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getUser();
 
-  if (error || !user) {
+  if (error || !data?.user) {
+    // Mantén el next si ya lo pasas en la URL actual
     redirect("/auth?next=" + encodeURIComponent("/"));
   }
-
-  return user;
+  return data.user;
 }
 
 /** Obtiene el usuario si existe (sin redirigir) */
 export async function getUserOptional() {
   const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-  return user ?? null;
+  const { data } = await supabase.auth.getUser();
+  return data?.user ?? null;
 }
