@@ -5,38 +5,39 @@ import { requireUser } from "@/lib/auth";
 export default async function Dashboard() {
   const { supabase, user } = await requireUser();
 
-  // Si tus tablas tienen 'user_id' como dueño, usamos eso:
-  //   payroll.employees.user_id
-  //   payroll.payroll_runs.user_id
-  // Cambia a 'tenant_id' o 'account_id' si ése es tu campo real.
-
-  // 1) Métricas básicas
+  // employees => public.employees
   const { count: employeesCount = 0 } = await supabase
-    .from("payroll.employees")
+    .from("employees")
     .select("*", { count: "exact", head: true })
     .eq("user_id", user.id);
 
+  // payroll_runs => public.payroll_runs
   const { data: latestRun } = await supabase
-    .from("payroll.payroll_runs")
+    .from("payroll_runs")
     .select("id, period_year, period_month, status")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  // 2) Totales del último run (si existe)
+  // Totales: si tienes una tabla payroll_slips, los calculamos sin RPC
   let totals = { gross: 0, net: 0, irpf: 0, ss_er: 0 };
   if (latestRun?.id) {
-    const { data } = await supabase.rpc("payroll_totals_by_run", {
-      p_run_id: latestRun.id,
-    });
-    if (data) {
-      totals = {
-        gross: Number(data.gross || 0),
-        net: Number(data.net || 0),
-        irpf: Number(data.irpf || 0),
-        ss_er: Number(data.ss_er || 0),
-      };
+    const { data: sums } = await supabase
+      .from("payroll_slips")
+      .select("gross, net, irpf, ss_employer")
+      .eq("run_id", latestRun.id);
+
+    if (sums?.length) {
+      totals = sums.reduce(
+        (acc, r: any) => ({
+          gross: acc.gross + Number(r.gross || 0),
+          net: acc.net + Number(r.net || 0),
+          irpf: acc.irpf + Number(r.irpf || 0),
+          ss_er: acc.ss_er + Number(r.ss_employer || 0),
+        }),
+        { gross: 0, net: 0, irpf: 0, ss_er: 0 }
+      );
     }
   }
 
@@ -69,3 +70,4 @@ function Card({ title, value }: { title: string; value: any }) {
     </div>
   );
 }
+
