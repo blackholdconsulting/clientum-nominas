@@ -3,53 +3,44 @@ export const dynamic = "force-dynamic";
 import { requireUser } from "@/lib/auth";
 import Link from "next/link";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+  Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Calculator,
-  Users,
-  FileText,
-  BarChart3,
-  LogOut,
-} from "lucide-react";
+import { Calculator, Users, FileText, BarChart3, LogOut } from "lucide-react";
 
-/**
- * Datos que se cargan:
- * - Empleados:     public.nominas_employees (vista de compatibilidad)
- * - Runs nómina:   public.payroll_runs      (user_id, period_year, period_month, status)
- * - Slips nómina:  public.payroll_slips     (run_id, gross, net, irpf, ss_employer)
- *
- * Multiusuario real: todas las consultas filtran por user.id (RLS hará el resto).
- */
-
+/** Carga segura: nunca rompe aunque falte una tabla/vista */
 export default async function DashboardPage() {
   const { supabase, user } = await requireUser();
 
-  // ---------- Empleados (por usuario) ----------
-  const { count: employeesCount = 0 } = await supabase
-    .from("nominas_employees")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id);
+  // --- Empleados (contar) ---
+  let employeesCount = 0;
+  try {
+    const { count } = await supabase
+      .from("nominas_employees")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id);
+    employeesCount = count ?? 0;
+  } catch {}
 
-  // ---------- Último run de nómina ----------
-  const { data: latestRun } = await supabase
-    .from("payroll_runs")
-    .select("id, period_year, period_month, status")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // --- Último run ---
+  let latestRun:
+    | { id: string; period_year: number; period_month: number; status: string }
+    | null = null;
+  try {
+    const { data } = await supabase
+      .from("payroll_runs")
+      .select("id, period_year, period_month, status")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    latestRun = data ?? null;
+  } catch {}
 
-  // ---------- Totales del último run ----------
+  // --- Totales del último run ---
   let totals = { gross: 0, net: 0, irpf: 0, ss_er: 0 };
   let hasSlipsTable = true;
-
   if (latestRun?.id) {
     try {
       const { data: slips } = await supabase
@@ -69,12 +60,10 @@ export default async function DashboardPage() {
         );
       }
     } catch {
-      // Si la tabla no existe aún, seguimos sin romper UI
       hasSlipsTable = false;
     }
   }
 
-  // Placeholders para secciones aún no conectadas
   const contractsPending = 0;
   const reportsPending = 0;
 
@@ -94,7 +83,7 @@ export default async function DashboardPage() {
               <Badge variant="secondary">Dashboard</Badge>
             </div>
 
-            {/* Puedes cambiar esto por tu /api/auth/logout cuando lo tengas */}
+            {/* Ajusta a tu logout real cuando quieras */}
             <form action="/auth?next=%2F" method="get">
               <Button variant="outline" size="sm">
                 <LogOut className="h-4 w-4 mr-2" />
@@ -107,7 +96,6 @@ export default async function DashboardPage() {
 
       {/* Main */}
       <main className="container mx-auto px-4 py-8">
-        {/* Título */}
         <div className="mb-8">
           <h2 className="text-3xl font-bold font-serif mb-2">
             Bienvenido{user.email ? `, ${user.email}` : ""}
@@ -158,9 +146,7 @@ export default async function DashboardPage() {
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle>Resumen financiero</CardTitle>
-              <CardDescription>
-                Costes de nómina del último periodo
-              </CardDescription>
+              <CardDescription>Costes de nómina del último periodo</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid md:grid-cols-3 gap-4">
@@ -178,8 +164,8 @@ export default async function DashboardPage() {
               </div>
               {!hasSlipsTable && (
                 <p className="text-xs text-muted-foreground mt-3">
-                  Nota: aún no existe <code>public.payroll_slips</code>. Los
-                  totales aparecerán cuando crees tus primeras nóminas.
+                  Nota: aún no existe <code>public.payroll_slips</code>. Los totales
+                  aparecerán cuando crees tus primeras nóminas.
                 </p>
               )}
             </CardContent>
@@ -265,7 +251,7 @@ export default async function DashboardPage() {
   );
 }
 
-/* ---------- Componentes auxiliares ---------- */
+/* ---------- Componentes ---------- */
 
 function QuickCard({
   href,
@@ -281,19 +267,21 @@ function QuickCard({
   badge: string;
 }) {
   return (
-    <Card className="hover:shadow-lg transition-shadow cursor-pointer" asChild>
-      <Link href={href}>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            {icon}
-            <Badge variant="secondary">{badge}</Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <CardTitle className="text-lg">{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardContent>
-      </Link>
+    <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          {icon}
+          <Badge variant="secondary">{badge}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <CardTitle className="text-lg">
+          <Link className="hover:underline" href={href}>
+            {title}
+          </Link>
+        </CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardContent>
     </Card>
   );
 }
@@ -316,10 +304,8 @@ function Kpi({
 }
 
 function AlertPill({ color, text }: { color: "destructive" | "blue"; text: string }) {
-  const dot =
-    color === "destructive" ? "bg-destructive" : "bg-blue-500";
-  const bg =
-    color === "destructive" ? "bg-destructive/10" : "bg-blue-50";
+  const dot = color === "destructive" ? "bg-destructive" : "bg-blue-500";
+  const bg = color === "destructive" ? "bg-destructive/10" : "bg-blue-50";
   return (
     <div className={`flex items-center space-x-2 p-2 rounded ${bg}`}>
       <div className={`w-2 h-2 rounded-full ${dot}`} />
