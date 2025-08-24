@@ -1,9 +1,17 @@
+// lib/supabase/server.ts
+'use server';
+
 import { cookies, headers } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 
+/**
+ * Cliente de Supabase para Server Components / Route Handlers.
+ * Es compatible con los imports que ya tienes:
+ *  - getSupabaseServerClient()
+ *  - supabaseServer()
+ */
 export function getSupabaseServerClient() {
   const cookieStore = cookies();
-  const headerList = headers();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,16 +21,27 @@ export function getSupabaseServerClient() {
         get(name: string) {
           return cookieStore.get(name)?.value;
         },
+        // En Server Components, Next no deja modificar cookies.
+        // Si se llama aquí, lo ignoramos para no romper el render.
         set(name: string, value: string, options: any) {
-          cookieStore.set({ name, value, ...options });
+          try {
+            // Solo tendrá efecto en Server Actions / Route Handlers.
+            cookieStore.set({ name, value, ...options });
+          } catch {
+            /* noop: evitamos tirar el SSR */
+          }
         },
         remove(name: string, options: any) {
-          cookieStore.set({ name, value: '', ...options });
+          try {
+            cookieStore.set({ name, value: '', ...options });
+          } catch {
+            /* noop */
+          }
         },
       },
       global: {
         headers: {
-          'X-Client-Info': headerList.get('user-agent') ?? 'clientum',
+          'x-forwarded-host': headers().get('host') ?? '',
         },
       },
     }
@@ -30,3 +49,7 @@ export function getSupabaseServerClient() {
 
   return supabase;
 }
+
+// Alias para compatibilidad con código existente
+export const supabaseServer = getSupabaseServerClient;
+export default getSupabaseServerClient;
