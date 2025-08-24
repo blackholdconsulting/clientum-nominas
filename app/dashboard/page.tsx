@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { requireUser } from "@/lib/auth";
+import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -10,7 +11,6 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
 import {
   Calculator,
   Users,
@@ -20,54 +20,61 @@ import {
 } from "lucide-react";
 
 /**
- * NOTAS RÁPIDAS
- * - Este dashboard asume tablas en esquema PUBLIC:
- *   - public.employees        (user_id uuid)
- *   - public.payroll_runs     (user_id uuid, period_year int, period_month int, status text)
- *   - public.payroll_slips    (run_id uuid, employee_id uuid, gross numeric, net numeric, irpf numeric, ss_employer numeric)
- * - Si los nombres difieren, cambia abajo los .from("...") y los campos.
+ * Datos que se cargan:
+ * - Empleados:     public.nominas_employees (vista de compatibilidad)
+ * - Runs nómina:   public.payroll_runs      (user_id, period_year, period_month, status)
+ * - Slips nómina:  public.payroll_slips     (run_id, gross, net, irpf, ss_employer)
+ *
+ * Multiusuario real: todas las consultas filtran por user.id (RLS hará el resto).
  */
 
 export default async function DashboardPage() {
   const { supabase, user } = await requireUser();
 
-  // ----- MÉTRICAS DE CABECERA -----
-  const [{ count: employeesCount = 0 }, { data: latestRun }] = await Promise.all([
-    supabase
-      .from("employees")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id),
-    supabase
-      .from("payroll_runs")
-      .select("id, period_year, period_month, status")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  // ---------- Empleados (por usuario) ----------
+  const { count: employeesCount = 0 } = await supabase
+    .from("nominas_employees")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", user.id);
 
-  // Totales del último run (si existe)
+  // ---------- Último run de nómina ----------
+  const { data: latestRun } = await supabase
+    .from("payroll_runs")
+    .select("id, period_year, period_month, status")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // ---------- Totales del último run ----------
   let totals = { gross: 0, net: 0, irpf: 0, ss_er: 0 };
-  if (latestRun?.id) {
-    const { data: slips } = await supabase
-      .from("payroll_slips")
-      .select("gross, net, irpf, ss_employer")
-      .eq("run_id", latestRun.id);
+  let hasSlipsTable = true;
 
-    if (slips?.length) {
-      totals = slips.reduce(
-        (acc: any, r: any) => ({
-          gross: acc.gross + Number(r.gross || 0),
-          net: acc.net + Number(r.net || 0),
-          irpf: acc.irpf + Number(r.irpf || 0),
-          ss_er: acc.ss_er + Number(r.ss_employer || 0),
-        }),
-        { gross: 0, net: 0, irpf: 0, ss_er: 0 }
-      );
+  if (latestRun?.id) {
+    try {
+      const { data: slips } = await supabase
+        .from("payroll_slips")
+        .select("gross, net, irpf, ss_employer")
+        .eq("run_id", latestRun.id);
+
+      if (slips?.length) {
+        totals = slips.reduce(
+          (acc: any, r: any) => ({
+            gross: acc.gross + Number(r.gross || 0),
+            net: acc.net + Number(r.net || 0),
+            irpf: acc.irpf + Number(r.irpf || 0),
+            ss_er: acc.ss_er + Number(r.ss_employer || 0),
+          }),
+          { gross: 0, net: 0, irpf: 0, ss_er: 0 }
+        );
+      }
+    } catch {
+      // Si la tabla no existe aún, seguimos sin romper UI
+      hasSlipsTable = false;
     }
   }
 
-  // Placeholder para “contratos” e “informes” si aún no tienes tablas
+  // Placeholders para secciones aún no conectadas
   const contractsPending = 0;
   const reportsPending = 0;
 
@@ -79,7 +86,7 @@ export default async function DashboardPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
-                <Calculator className="h-8 w-8 text-primary" />
+                <Calculator className="h-7 w-7 text-primary" />
                 <h1 className="text-2xl font-bold font-serif text-primary">
                   Clientum Nóminas
                 </h1>
@@ -87,7 +94,7 @@ export default async function DashboardPage() {
               <Badge variant="secondary">Dashboard</Badge>
             </div>
 
-            {/* puedes cambiar este botón cuando añadas /api/auth/logout */}
+            {/* Puedes cambiar esto por tu /api/auth/logout cuando lo tengas */}
             <form action="/auth?next=%2F" method="get">
               <Button variant="outline" size="sm">
                 <LogOut className="h-4 w-4 mr-2" />
@@ -100,6 +107,7 @@ export default async function DashboardPage() {
 
       {/* Main */}
       <main className="container mx-auto px-4 py-8">
+        {/* Título */}
         <div className="mb-8">
           <h2 className="text-3xl font-bold font-serif mb-2">
             Bienvenido{user.email ? `, ${user.email}` : ""}
@@ -111,134 +119,102 @@ export default async function DashboardPage() {
 
         {/* Acciones rápidas */}
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer" asChild>
-            <Link href="/employees">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <Users className="h-8 w-8 text-primary" />
-                  <Badge variant="secondary">{employeesCount}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardTitle className="text-lg">Empleados</CardTitle>
-                <CardDescription>Gestionar empleados activos</CardDescription>
-              </CardContent>
-            </Link>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer" asChild>
-            <Link href="/contracts">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <FileText className="h-8 w-8 text-primary" />
-                  <Badge variant="secondary">{contractsPending}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardTitle className="text-lg">Contratos</CardTitle>
-                <CardDescription>Contratos pendientes de revisión</CardDescription>
-              </CardContent>
-            </Link>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer" asChild>
-            <Link href="/payroll">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <Calculator className="h-8 w-8 text-primary" />
-                  <Badge variant="secondary">
-                    {latestRun ? "Periodo" : "—"}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardTitle className="text-lg">Nóminas</CardTitle>
-                <CardDescription>
-                  {latestRun
-                    ? `Último: ${latestRun.period_month}/${latestRun.period_year} (${latestRun.status})`
-                    : "Aún no hay runs"}
-                </CardDescription>
-              </CardContent>
-            </Link>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer" asChild>
-            <Link href="/reports">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <BarChart3 className="h-8 w-8 text-primary" />
-                  <Badge variant="secondary">{reportsPending}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <CardTitle className="text-lg">Informes</CardTitle>
-                <CardDescription>Informes pendientes de generar</CardDescription>
-              </CardContent>
-            </Link>
-          </Card>
+          <QuickCard
+            href="/employees"
+            icon={<Users className="h-8 w-8 text-primary" />}
+            title="Empleados"
+            description="Gestionar empleados activos"
+            badge={String(employeesCount)}
+          />
+          <QuickCard
+            href="/contracts"
+            icon={<FileText className="h-8 w-8 text-primary" />}
+            title="Contratos"
+            description="Contratos pendientes de revisión"
+            badge={String(contractsPending)}
+          />
+          <QuickCard
+            href="/payroll"
+            icon={<Calculator className="h-8 w-8 text-primary" />}
+            title="Nóminas"
+            description={
+              latestRun
+                ? `Último: ${latestRun.period_month}/${latestRun.period_year} (${latestRun.status})`
+                : "Aún no hay runs"
+            }
+            badge={latestRun ? "Periodo" : "—"}
+          />
+          <QuickCard
+            href="/reports"
+            icon={<BarChart3 className="h-8 w-8 text-primary" />}
+            title="Informes"
+            description="Informes pendientes de generar"
+            badge={String(reportsPending)}
+          />
         </div>
 
         {/* Resumen + Alertas */}
         <div className="grid lg:grid-cols-3 gap-6 mb-8">
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle>Resumen Financiero</CardTitle>
-              <CardDescription>Costes de nómina del último periodo</CardDescription>
+              <CardTitle>Resumen financiero</CardTitle>
+              <CardDescription>
+                Costes de nómina del último periodo
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid md:grid-cols-3 gap-4">
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <div className="text-2xl font-bold text-primary">
-                    €{totals.gross.toFixed(2)}
-                  </div>
-                  <p className="text-sm text-muted-foreground">Total Bruto</p>
-                </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600">
-                    €{totals.net.toFixed(2)}
-                  </div>
-                  <p className="text-sm text-muted-foreground">Total Neto</p>
-                </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <div className="text-2xl font-bold text-orange-600">
-                    €{totals.irpf.toFixed(2)}
-                  </div>
-                  <p className="text-sm text-muted-foreground">IRPF</p>
-                </div>
+                <Kpi label="Total Bruto" value={`€${totals.gross.toFixed(2)}`} />
+                <Kpi
+                  label="Neto a pagar"
+                  value={`€${totals.net.toFixed(2)}`}
+                  classNameValue="text-green-600"
+                />
+                <Kpi
+                  label="IRPF"
+                  value={`€${totals.irpf.toFixed(2)}`}
+                  classNameValue="text-orange-600"
+                />
               </div>
+              {!hasSlipsTable && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  Nota: aún no existe <code>public.payroll_slips</code>. Los
+                  totales aparecerán cuando crees tus primeras nóminas.
+                </p>
+              )}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Alertas del Sistema</CardTitle>
+              <CardTitle>Alertas del sistema</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex items-center space-x-2 p-2 bg-destructive/10 rounded">
-                <div className="w-2 h-2 bg-destructive rounded-full"></div>
-                <span className="text-sm">
-                  {employeesCount === 0
+              <AlertPill
+                color="destructive"
+                text={
+                  employeesCount === 0
                     ? "Aún no has añadido empleados"
-                    : "Sin alertas críticas"}
-                </span>
-              </div>
-              <div className="flex items-center space-x-2 p-2 bg-blue-50 rounded">
-                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                <span className="text-sm">
-                  {latestRun
+                    : "Sin alertas críticas"
+                }
+              />
+              <AlertPill
+                color="blue"
+                text={
+                  latestRun
                     ? `Último run: ${latestRun.period_month}/${latestRun.period_year} (${latestRun.status})`
-                    : "Crea tu primer run de nómina"}
-                </span>
-              </div>
+                    : "Crea tu primer run de nómina"
+                }
+              />
             </CardContent>
           </Card>
         </div>
 
-        {/* Actividad + Próximas tareas (placeholder funcional) */}
+        {/* Actividad + Próximas tareas */}
         <div className="grid lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Actividad Reciente</CardTitle>
+              <CardTitle>Actividad reciente</CardTitle>
               <CardDescription>Últimas acciones en el sistema</CardDescription>
             </CardHeader>
             <CardContent>
@@ -257,7 +233,7 @@ export default async function DashboardPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Próximas Tareas</CardTitle>
+              <CardTitle>Próximas tareas</CardTitle>
               <CardDescription>Tareas pendientes importantes</CardDescription>
             </CardHeader>
             <CardContent>
@@ -289,7 +265,68 @@ export default async function DashboardPage() {
   );
 }
 
-/* ------- Componentes auxiliares ------- */
+/* ---------- Componentes auxiliares ---------- */
+
+function QuickCard({
+  href,
+  icon,
+  title,
+  description,
+  badge,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  badge: string;
+}) {
+  return (
+    <Card className="hover:shadow-lg transition-shadow cursor-pointer" asChild>
+      <Link href={href}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            {icon}
+            <Badge variant="secondary">{badge}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <CardTitle className="text-lg">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardContent>
+      </Link>
+    </Card>
+  );
+}
+
+function Kpi({
+  label,
+  value,
+  classNameValue,
+}: {
+  label: string;
+  value: string;
+  classNameValue?: string;
+}) {
+  return (
+    <div className="text-center p-4 bg-muted/50 rounded-lg">
+      <div className={`text-2xl font-bold ${classNameValue ?? ""}`}>{value}</div>
+      <p className="text-sm text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+function AlertPill({ color, text }: { color: "destructive" | "blue"; text: string }) {
+  const dot =
+    color === "destructive" ? "bg-destructive" : "bg-blue-500";
+  const bg =
+    color === "destructive" ? "bg-destructive/10" : "bg-blue-50";
+  return (
+    <div className={`flex items-center space-x-2 p-2 rounded ${bg}`}>
+      <div className={`w-2 h-2 rounded-full ${dot}`} />
+      <span className="text-sm">{text}</span>
+    </div>
+  );
+}
 
 function ActivityDot({
   color,
@@ -325,13 +362,7 @@ function TaskRow({
   title: string;
   meta: string;
   badge: string;
-  badgeVariant:
-    | "default"
-    | "secondary"
-    | "destructive"
-    | "outline"
-    | "success"
-    | "warning";
+  badgeVariant: "default" | "secondary" | "destructive" | "outline";
 }) {
   return (
     <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
@@ -339,7 +370,7 @@ function TaskRow({
         <p className="text-sm font-medium">{title}</p>
         <p className="text-xs text-muted-foreground">{meta}</p>
       </div>
-      <Badge variant={badgeVariant as any}>{badge}</Badge>
+      <Badge variant={badgeVariant}>{badge}</Badge>
     </div>
   );
 }
