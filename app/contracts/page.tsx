@@ -1,9 +1,7 @@
-// app/contracts/page.tsx
-export const dynamic = "force-dynamic";
+"use client";
 
-import { hardRequireUser } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
-
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,10 +23,7 @@ import {
   Eye,
   Info,
 } from "lucide-react";
-import Link from "next/link";
-import { useMemo, useState } from "react";
 
-/* ---------- Tipado UI ---------- */
 type UiContract = {
   id: string;
   employeeId: string | null;
@@ -45,101 +40,48 @@ type UiContract = {
   lastModified: string | null;
 };
 
-/* ---------- SERVER: obtener datos para el usuario ---------- */
-async function getContractsForUser(): Promise<{ rows: UiContract[]; note?: string }> {
-  const { user, supabase } = await hardRequireUser("/contracts");
+export default function ContractsPage() {
+  const [contracts, setContracts] = useState<UiContract[]>([]);
+  const [note, setNote] = useState<string | undefined>(undefined);
 
-  try {
-    const { data, error } = await supabase
-      .from("contracts")
-      .select(`
-        id,
-        user_id,
-        employee_id,
-        type,
-        position,
-        department,
-        start_date,
-        end_date,
-        salary,
-        status,
-        renewal_date,
-        created_at,
-        updated_at,
-        employees:employee_id ( first_name, last_name )
-      `)
-      .order("created_at", { ascending: false });
-
-    if (error) throw error;
-
-    const rows: UiContract[] = (data ?? []).map((r: any) => {
-      const full =
-        r?.employees?.first_name || r?.employees?.last_name
-          ? `${r?.employees?.first_name ?? ""} ${r?.employees?.last_name ?? ""}`.trim()
-          : "—";
-
-      return {
-        id: r.id,
-        employeeId: r.employee_id ?? null,
-        employeeName: full,
-        contractType: r.type ?? null,
-        position: r.position ?? null,
-        department: r.department ?? null,
-        startDate: r.start_date ?? null,
-        endDate: r.end_date ?? null,
-        salary: typeof r.salary === "number" ? r.salary : r.salary ? Number(r.salary) : null,
-        status: r.status ?? null,
-        renewalDate: r.renewal_date ?? null,
-        createdDate: r.created_at ?? null,
-        lastModified: r.updated_at ?? r.created_at ?? null,
-      };
-    });
-
-    return { rows };
-  } catch (e: any) {
-    // Si la tabla no existe o falla el JOIN, devolvemos lista vacía y nota
-    return {
-      rows: [],
-      note:
-        e?.message?.includes("relation") || e?.message?.includes("does not exist")
-          ? "La tabla 'contracts' aún no existe o el JOIN a 'employees' no coincide con tu esquema. El UI seguirá cargando sin datos."
-          : e?.message || String(e),
-    };
-  }
-}
-
-/* ---------- CLIENT: UI con filtros (sin fetch) ---------- */
-function ContractsClient({ initialContracts, note }: { initialContracts: UiContract[]; note?: string }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [contracts] = useState<UiContract[]>(initialContracts);
+
+  useEffect(() => {
+    let ab = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch("/api/contracts", { signal: ab.signal });
+        if (!res.ok) throw new Error(await res.text());
+        const payload = (await res.json()) as { rows: UiContract[]; note?: string };
+        setContracts(payload.rows || []);
+        setNote(payload.note);
+      } catch (e: any) {
+        setNote(e?.message || "No se pudieron cargar los contratos.");
+        setContracts([]);
+      }
+    })();
+    return () => ab.abort();
+  }, []);
 
   const filteredContracts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return contracts.filter((contract) => {
+    return contracts.filter((c) => {
       const matchesSearch =
         !term ||
-        (contract.employeeName ?? "").toLowerCase().includes(term) ||
-        (contract.position ?? "").toLowerCase().includes(term) ||
-        (contract.department ?? "").toLowerCase().includes(term);
+        (c.employeeName ?? "").toLowerCase().includes(term) ||
+        (c.position ?? "").toLowerCase().includes(term) ||
+        (c.department ?? "").toLowerCase().includes(term);
 
-      const matchesType = typeFilter === "all" || contract.contractType === typeFilter;
-      const matchesStatus = statusFilter === "all" || contract.status === statusFilter;
+      const matchesType = typeFilter === "all" || c.contractType === typeFilter;
+      const matchesStatus = statusFilter === "all" || c.status === statusFilter;
 
       return matchesSearch && matchesType && matchesStatus;
     });
   }, [contracts, searchTerm, typeFilter, statusFilter]);
 
-  const contractTypes = useMemo(
-    () => Array.from(new Set(contracts.map((c) => c.contractType).filter(Boolean))) as string[],
-    [contracts]
-  );
-
-  const activeContracts = useMemo(
-    () => contracts.filter((c) => c.status === "Activo").length,
-    [contracts]
-  );
+  const activeContracts = useMemo(() => contracts.filter((c) => c.status === "Activo").length, [contracts]);
   const expiringContracts = useMemo(
     () => contracts.filter((c) => c.status === "Próximo a Vencer").length,
     [contracts]
@@ -195,7 +137,7 @@ function ContractsClient({ initialContracts, note }: { initialContracts: UiContr
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        {/* Nota de diagnóstico si no hay tabla / join falla */}
+        {/* Nota */}
         {note && (
           <Card className="mb-6">
             <CardHeader className="flex flex-row items-center gap-2">
@@ -413,10 +355,4 @@ function ContractsClient({ initialContracts, note }: { initialContracts: UiContr
       </main>
     </div>
   );
-}
-
-/* ---------- PAGE SSR ---------- */
-export default async function ContractsPage() {
-  const { rows, note } = await getContractsForUser();
-  return <ContractsClient initialContracts={rows} note={note} />;
 }
