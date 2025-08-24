@@ -1,12 +1,9 @@
-// lib/supabase/server.ts
-import { cookies, headers } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+import { cookies, headers } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 
 export function getSupabaseServerClient() {
-  const cookieStore = cookies(); // OK leer aquí
-
-  // MUY IMPORTANTE: no llames cookieStore.set() aquí.
-  // Este cliente se usa solo en Server Components/Route Handlers.
+  const cookieStore = cookies();
+  const headerList = headers();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,15 +13,18 @@ export function getSupabaseServerClient() {
         get(name: string) {
           return cookieStore.get(name)?.value;
         },
-        set() {
-          // NOOP: no se permite modificar cookies en Server Components
+        set(name: string, value: string, options: any) {
+          cookieStore.set({ name, value, ...options });
         },
-        remove() {
-          // NOOP
+        remove(name: string, options: any) {
+          cookieStore.set({ name, value: '', ...options });
         },
       },
-      // opcionalmente reenvía headers (para RLS basados en JWT si fuese tu caso)
-      global: { headers: { "x-forwarded-host": headers().get("host") ?? "" } },
+      global: {
+        headers: {
+          'X-Client-Info': headerList.get('user-agent') ?? 'clientum',
+        },
+      },
     }
   );
 
