@@ -1,2 +1,7 @@
-// Reexporta las server actions “globales” de payroll
-export { finalizePayroll, saveItem, generatePayroll } from '@/app/payroll/actions';
+// Reexporta para que ../../actions de /period/[year]/[month]/page.tsx funcione
+export {
+  finalizePayroll,
+  saveItem,
+  generatePayroll,
+  upsertPayroll,
+} from "@/app/payroll/actions";
