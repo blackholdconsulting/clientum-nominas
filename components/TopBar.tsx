@@ -4,17 +4,18 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-type NavItem = { name: string; href: string; activeOn: string[] };
+type NavItem = { name: string; href: string; activeOn?: string[] };
 
 const nav: NavItem[] = [
-  { name: "Dashboard",     href: "/dashboard",    activeOn: ["/dashboard"] },
-  { name: "Empleados",     href: "/employees",    activeOn: ["/employees"] },
-  // ⬇️ Corregido: Nóminas → /payroll, pero se marca activo también en /payrolls
-  { name: "Nóminas",       href: "/payroll",      activeOn: ["/payroll", "/payrolls"] },
-  { name: "Plantillas",    href: "/contracts",    activeOn: ["/contracts"] },
-  { name: "Departamentos", href: "/departments",  activeOn: ["/departments"] },
-  { name: "Documentos",    href: "/documents",    activeOn: ["/documents"] },
-  { name: "Ajustes",       href: "/settings",     activeOn: ["/settings"] },
+  { name: "Dashboard",     href: "/dashboard" },
+  { name: "Empleados",     href: "/employees" },
+  // ✅ Nóminas debe abrir /contracts
+  { name: "Nóminas",       href: "/contracts",  activeOn: ["/contracts", "/nominas", "/payroll", "/payrolls"] },
+  // Plantillas la dejamos en /plantillas (ajusto activeOn por si usas subrutas)
+  { name: "Plantillas",    href: "/plantillas", activeOn: ["/plantillas"] },
+  { name: "Departamentos", href: "/departments" },
+  { name: "Documentos",    href: "/documents" },
+  { name: "Ajustes",       href: "/settings" },
 ];
 
 export default function TopBar() {
@@ -32,7 +33,8 @@ export default function TopBar() {
 
         <nav className="hidden md:flex items-center gap-2">
           {nav.map((item) => {
-            const active = item.activeOn.some(
+            const actives = item.activeOn ?? [item.href];
+            const active = actives.some(
               (p) => pathname === p || pathname.startsWith(p + "/")
             );
             return (
