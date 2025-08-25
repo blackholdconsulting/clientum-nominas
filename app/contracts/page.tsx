@@ -11,11 +11,11 @@ import { Plus, FileText, CheckCircle2, AlertTriangle, Filter } from "lucide-reac
 
 export const dynamic = "force-dynamic";
 
-function fmt(date?: string | null) {
-  if (!date) return "—";
-  const d = new Date(date);
-  return d.toLocaleDateString();
-}
+const nameOf = (e: any) => {
+  const byParts = [e.first_name, e.last_name].filter(Boolean).join(" ");
+  return (e.full_name || e.name || byParts || e.email || "Empleado") as string;
+};
+const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
 
 export default async function ContractsPage({
   searchParams,
@@ -23,14 +23,18 @@ export default async function ContractsPage({
   const supabase = getSupabaseServerClient();
   const user = await requireUser();
 
-  // Empleados SOLO del usuario actual
-  const { data: employees } = await supabase
+  // Empleados del usuario (o sin asignar) → leemos * y ordenamos client-side
+  const { data: employeesRaw } = await supabase
     .from("employees")
-    .select("id, full_name")
-    .eq("user_id", user.id)
-    .order("full_name", { ascending: true });
+    .select("*")
+    .or(`user_id.eq.${user.id},user_id.is.null`)
+    .order("created_at", { ascending: true });
 
-  // Contadores SOLO del usuario actual
+  const employees = (employeesRaw ?? []).sort((a: any, b: any) =>
+    nameOf(a).localeCompare(nameOf(b))
+  );
+
+  // KPIs del usuario
   const todayISO = new Date().toISOString().slice(0, 10);
   const in30 = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
 
@@ -41,26 +45,25 @@ export default async function ContractsPage({
       supabase.from("contracts").select("id", { count: "exact", head: true }).eq("user_id", user.id).gte("end_date", todayISO).lte("end_date", in30),
     ]);
 
-  // Filtros
-  const q = (searchParams?.q ?? "").trim();
+  // Listado (unimos empleado con * para evitar columnas inexistentes) + filtro client-side por nombre
+  const q = (searchParams?.q ?? "").trim().toLowerCase();
   const status = (searchParams?.status ?? "").trim();
 
   let listQuery = supabase
     .from("contracts")
-    .select("id, contract_type, start_date, end_date, status, employee:employees(id, full_name)")
+    .select("id, contract_type, start_date, end_date, status, employee:employees(*)")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
   if (status) listQuery = listQuery.eq("status", status);
-  // Para buscar por nombre, hacemos un join client-side si la búsqueda no es soportada server-side:
   const { data: rowsRaw } = await listQuery;
-  const rows = (rowsRaw ?? []).filter((c) =>
-    q ? (c as any).employee?.full_name?.toLowerCase().includes(q.toLowerCase()) : true
+
+  const rows = (rowsRaw ?? []).filter((c: any) =>
+    q ? nameOf(c.employee ?? {}).toLowerCase().includes(q) : true
   );
 
   return (
     <main className="max-w-7xl mx-auto p-4 md:p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <BackButton />
@@ -84,8 +87,8 @@ export default async function ContractsPage({
               <label className="block text-sm text-slate-600 mb-1">Empleado</label>
               <select name="employee_id" className="w-full rounded-md border bg-white px-3 py-2 text-sm" defaultValue="" required>
                 <option value="" disabled>Selecciona empleado</option>
-                {(employees ?? []).map((e) => (
-                  <option key={e.id} value={e.id}>{e.full_name}</option>
+                {employees.map((e: any) => (
+                  <option key={e.id} value={e.id}>{nameOf(e)}</option>
                 ))}
               </select>
             </div>
@@ -136,7 +139,7 @@ export default async function ContractsPage({
       <Card className="shadow-clientum mb-4">
         <CardContent className="p-4">
           <form className="flex flex-col md:flex-row gap-3 items-center">
-            <div className="flex-1 w-full"><Input name="q" placeholder="Buscar por empleado…" defaultValue={q} /></div>
+            <div className="flex-1 w-full"><Input name="q" placeholder="Buscar por empleado…" defaultValue={searchParams?.q ?? ""} /></div>
             <select name="status" defaultValue={status} className="rounded-md border bg-white px-3 py-2 text-sm">
               <option value="">Todos</option>
               <option value="draft">Borrador</option>
@@ -169,14 +172,14 @@ export default async function ContractsPage({
                   <TableCell colSpan={5} className="text-center py-10 text-slate-500">Sin resultados</TableCell>
                 </TableRow>
               ) : (
-                rows.map((c) => (
+                rows.map((c: any) => (
                   <TableRow key={c.id}>
-                    <TableCell className="font-medium">{(c as any).employee?.full_name ?? "—"}</TableCell>
-                    <TableCell>{(c as any).contract_type}</TableCell>
-                    <TableCell>{fmt((c as any).start_date)} {(c as any).end_date ? `→ ${fmt((c as any).end_date)}` : ""}</TableCell>
-                    <TableCell className="capitalize">{(c as any).status}</TableCell>
+                    <TableCell className="font-medium">{nameOf(c.employee ?? {})}</TableCell>
+                    <TableCell>{c.contract_type}</TableCell>
+                    <TableCell>{fmt(c.start_date)} {c.end_date ? `→ ${fmt(c.end_date)}` : ""}</TableCell>
+                    <TableCell className="capitalize">{c.status}</TableCell>
                     <TableCell className="text-right">
-                      <Link href={`/contracts/${(c as any).id}`} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50">Abrir</Link>
+                      <Link href={`/contracts/${c.id}`} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50">Abrir</Link>
                     </TableCell>
                   </TableRow>
                 ))
