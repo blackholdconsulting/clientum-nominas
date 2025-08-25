@@ -1,14 +1,21 @@
-// tailwind.config.ts
-import type { Config } from "tailwindcss";
-
-export default {
+/** @type {import('tailwindcss').Config} */
+module.exports = {
   content: [
-    "./app/**/*.{ts,tsx,js,jsx}",
-    "./components/**/*.{ts,tsx,js,jsx}",
-    "./pages/**/*.{ts,tsx,js,jsx}",
+    "./app/**/*.{ts,tsx}",
+    "./components/**/*.{ts,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        clientum: {
+          blue: "#1677FF",     // Azul corporativo Clientum
+          blueDark: "#0E53B5", // Azul oscuro para hover/sombras
+        }
+      },
+      boxShadow: {
+        clientum: "0 10px 25px -10px rgba(22, 119, 255, .35)",
+      }
+    },
   },
   plugins: [],
-} satisfies Config;
+}
