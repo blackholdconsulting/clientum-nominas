@@ -14,26 +14,59 @@ export default async function EditEmployeePage({
   params: { id: string };
 }) {
   const supabase = getSupabaseServerClient();
-  await requireUser(); // deja que la RLS gobierne
+  await requireUser(); // RLS activa
 
-  // ⬇️ leemos por id (sin filtrar por user_id para soportar "claim or null")
-  const [{ data: emp }, { data: departments }] = await Promise.all([
-    supabase.from("employees").select("*").eq("id", params.id).maybeSingle(),
-    supabase.from("departments").select("id, name").order("name", { ascending: true }),
-  ]);
+  // 1) Leemos empleado y departamentos de forma segura y sin reventar el render
+  let emp: any | null = null;
+  let departments: { id: string; name: string }[] = [];
+  let loadError: string | null = null;
+
+  // Empleado
+  try {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("*")
+      .eq("id", params.id)
+      .maybeSingle();
+    if (error) loadError = error.message;
+    emp = data ?? null;
+  } catch (e: any) {
+    loadError = e?.message || String(e);
+  }
+
+  // Departamentos (si existe la tabla / aunque falle no rompemos)
+  try {
+    const { data } = await supabase
+      .from("departments")
+      .select("id, name")
+      .order("name", { ascending: true });
+    departments = data ?? [];
+  } catch {
+    departments = [];
+  }
 
   if (!emp) {
     return (
       <main className="max-w-6xl mx-auto p-4 md:p-6">
         <BackButton />
-        <p className="mt-6 text-slate-600">Empleado no encontrado.</p>
+        <h1 className="text-2xl md:text-3xl font-semibold text-slate-900 mt-2">
+          Editar empleado
+        </h1>
+        <Card className="shadow-clientum mt-6">
+          <CardContent className="p-6">
+            <p className="text-slate-600">
+              {loadError ? `Error: ${loadError}` : "Empleado no encontrado."}
+            </p>
+          </CardContent>
+        </Card>
       </main>
     );
   }
 
-  // Helpers para inputs date/number
-  const d = (v?: string | null) => (v ? v : "");
-  const n = (v?: number | null) => (v ?? "") as any;
+  // Helpers
+  const dateOrEmpty = (v?: string | null) => (v ? v : "");
+  const numberOrEmpty = (v?: number | string | null) =>
+    v === null || v === undefined ? "" : String(v);
 
   return (
     <main className="max-w-6xl mx-auto p-4 md:p-6">
@@ -59,9 +92,7 @@ export default async function EditEmployeePage({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-slate-600 mb-1">
-                  Nombre
-                </label>
+                <label className="block text-sm text-slate-600 mb-1">Nombre</label>
                 <Input
                   name="first_name"
                   defaultValue={emp.first_name ?? ""}
@@ -69,9 +100,7 @@ export default async function EditEmployeePage({
                 />
               </div>
               <div>
-                <label className="block text-sm text-slate-600 mb-1">
-                  Apellidos
-                </label>
+                <label className="block text-sm text-slate-600 mb-1">Apellidos</label>
                 <Input
                   name="last_name"
                   defaultValue={emp.last_name ?? ""}
@@ -92,19 +121,16 @@ export default async function EditEmployeePage({
               </div>
 
               <div>
-                <label className="block text-sm text-slate-600 mb-1">
-                  DNI/NIE
-                </label>
+                <label className="block text-sm text-slate-600 mb-1">DNI/NIE</label>
                 <Input
                   name="national_id"
                   defaultValue={emp.national_id ?? ""}
                   placeholder="12345678A"
                 />
               </div>
+
               <div>
-                <label className="block text-sm text-slate-600 mb-1">
-                  Teléfono
-                </label>
+                <label className="block text-sm text-slate-600 mb-1">Teléfono</label>
                 <Input
                   name="phone"
                   defaultValue={emp.phone ?? ""}
@@ -113,9 +139,7 @@ export default async function EditEmployeePage({
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm text-slate-600 mb-1">
-                  Dirección
-                </label>
+                <label className="block text-sm text-slate-600 mb-1">Dirección</label>
                 <Input
                   name="address_line"
                   defaultValue={emp.address_line ?? ""}
@@ -124,15 +148,12 @@ export default async function EditEmployeePage({
               </div>
 
               <div>
-                <label className="block text-sm text-slate-600 mb-1">
-                  Ciudad
-                </label>
+                <label className="block text-sm text-slate-600 mb-1">Ciudad</label>
                 <Input name="city" defaultValue={emp.city ?? ""} placeholder="Madrid" />
               </div>
+
               <div>
-                <label className="block text-sm text-slate-600 mb-1">
-                  Código Postal
-                </label>
+                <label className="block text-sm text-slate-600 mb-1">Código Postal</label>
                 <Input
                   name="postal_code"
                   defaultValue={emp.postal_code ?? ""}
@@ -144,7 +165,11 @@ export default async function EditEmployeePage({
                 <label className="block text-sm text-slate-600 mb-1">
                   Fecha de Nacimiento
                 </label>
-                <Input type="date" name="birth_date" defaultValue={d(emp.birth_date)} />
+                <Input
+                  type="date"
+                  name="birth_date"
+                  defaultValue={dateOrEmpty(emp.birth_date)}
+                />
               </div>
             </div>
           </CardContent>
@@ -212,14 +237,22 @@ export default async function EditEmployeePage({
                 <label className="block text-sm text-slate-600 mb-1">
                   Fecha de Inicio
                 </label>
-                <Input type="date" name="start_date" defaultValue={d(emp.start_date)} />
+                <Input
+                  type="date"
+                  name="start_date"
+                  defaultValue={dateOrEmpty(emp.start_date)}
+                />
               </div>
 
               <div>
                 <label className="block text-sm text-slate-600 mb-1">
                   Horas Semanales
                 </label>
-                <Input name="weekly_hours" defaultValue={n(emp.weekly_hours)} placeholder="40" />
+                <Input
+                  name="weekly_hours"
+                  defaultValue={numberOrEmpty(emp.weekly_hours)}
+                  placeholder="40"
+                />
               </div>
 
               <div>
@@ -231,7 +264,7 @@ export default async function EditEmployeePage({
                   <Input
                     className="pl-7"
                     name="annual_salary_eur"
-                    defaultValue={n(emp.annual_salary_eur)}
+                    defaultValue={numberOrEmpty(emp.annual_salary_eur)}
                     placeholder="35000"
                   />
                 </div>
@@ -261,7 +294,11 @@ export default async function EditEmployeePage({
                 <label className="block text-sm text-slate-600 mb-1">
                   Nº Seguridad Social
                 </label>
-                <Input name="ssn" defaultValue={emp.ssn ?? ""} placeholder="12 1234567890" />
+                <Input
+                  name="ssn"
+                  defaultValue={emp.ssn ?? ""}
+                  placeholder="12 1234567890"
+                />
               </div>
 
               <div className="md:col-span-2">
