@@ -1,84 +1,97 @@
 "use server";
 
-import { createSupabaseServer } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
-import { buildPayrollPdf } from "@/utils/pdf/buildPayrollPdf";
-import { uploadPdf } from "@/utils/pdf/upload";
+import { redirect } from "next/navigation";
+import { createSupabaseServer } from "@/utils/supabase/server";
 
+/** Genera (o abre) la nómina del periodo. Devuelve payroll_id. */
 export async function generatePayroll(year: number, month: number) {
-  const supabase = createSupabaseServer();
-  const { data, error } = await supabase.rpc("payroll_generate_period", { p_year: year, p_month: month });
+  const s = createSupabaseServer();
+  const { data, error } = await s.rpc("payroll_generate_period", {
+    p_year: year,
+    p_month: month,
+  });
   if (error) throw error;
-  revalidatePath(`/payroll/${year}/${month}`);
-  return data as string; // payroll_id
+  revalidatePath(`/payroll`);
+  return data as string;
 }
 
-const SaveItemSchema = z.object({
-  id: z.string(),
-  base_gross: z.coerce.number(),
-  irpf_amount: z.coerce.number(),
-  ss_emp_amount: z.coerce.number(),
-  ss_er_amount: z.coerce.number(),
-  net: z.coerce.number(),
-});
-
-export async function saveItem(form: FormData) {
-  const parsed = SaveItemSchema.parse({
-    id: form.get("id"),
-    base_gross: form.get("base_gross"),
-    irpf_amount: form.get("irpf_amount"),
-    ss_emp_amount: form.get("ss_emp_amount"),
-    ss_er_amount: form.get("ss_er_amount"),
-    net: form.get("net"),
-  });
-
-  const supabase = createSupabaseServer();
-  const { error } = await supabase
-    .from("payroll_items")
-    .update({
-      base_gross: parsed.base_gross,
-      irpf_amount: parsed.irpf_amount,
-      ss_emp_amount: parsed.ss_emp_amount,
-      ss_er_amount: parsed.ss_er_amount,
-      net: parsed.net,
-    })
-    .eq("id", parsed.id);
-
+/** Guarda una línea (formData con campos numéricos) */
+export async function saveItem(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const patch = {
+    base_gross: Number(formData.get("base_gross") ?? 0),
+    irpf_amount: Number(formData.get("irpf_amount") ?? 0),
+    ss_emp_amount: Number(formData.get("ss_emp_amount") ?? 0),
+    ss_er_amount: Number(formData.get("ss_er_amount") ?? 0),
+    net: Number(formData.get("net") ?? 0),
+  };
+  const s = createSupabaseServer();
+  const { error } = await s.from("payroll_items").update(patch).eq("id", id);
   if (error) throw error;
+
+  // intenta leer el payroll_id para revalidar/redirect si hace falta
+  const { data: item } = await s
+    .from("payroll_items")
+    .select("payroll_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (item?.payroll_id) {
+    const { data: hdr } = await s
+      .from("payrolls")
+      .select("period_year,period_month")
+      .eq("id", item.payroll_id)
+      .maybeSingle();
+    if (hdr) revalidatePath(`/payroll/period/${hdr.period_year}/${hdr.period_month}`);
+  }
   return { ok: true };
 }
 
+/** Finaliza la nómina (sella) y revalida */
 export async function finalizePayroll(payrollId: string) {
-  const supabase = createSupabaseServer();
+  const s = createSupabaseServer();
+  const { error } = await s.rpc("payroll_finalize", { p_payroll: payrollId });
+  if (error) throw error;
 
-  // Sella la nómina
-  const { error: e1 } = await supabase.rpc("payroll_finalize", { p_payroll: payrollId });
-  if (e1) throw e1;
-
-  // Descarga items + empleados para generar PDFs
-  const { data: header, error: e2 } = await supabase
+  const { data: hdr } = await s
     .from("payrolls")
-    .select("*")
+    .select("period_year,period_month")
     .eq("id", payrollId)
     .single();
-  if (e2) throw e2;
-
-  const { data: items, error: e3 } = await supabase
-    .from("payroll_items")
-    .select("*, employees:employee_id (full_name, email)")
-    .eq("payroll_id", payrollId);
-  if (e3) throw e3;
-
-  // Genera y sube un PDF por empleado
-  for (const item of items ?? []) {
-    const pdfBytes = await buildPayrollPdf({ header, item });
-    await uploadPdf({
-      supabase,
-      bytes: pdfBytes,
-      path: `${header.user_id}/${header.period_year}-${String(header.period_month).padStart(2,"0")}/${item.employee_id}.pdf`,
-    });
-  }
-
+  revalidatePath(`/payroll/period/${hdr.period_year}/${hdr.period_month}`);
   return { ok: true };
+}
+
+/** Compat: algunas páginas importan upsertPayroll desde ../../actions */
+export async function upsertPayroll(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const period_year = Number(formData.get("period_year") ?? 0);
+  const period_month = Number(formData.get("period_month") ?? 0);
+  const status = String(formData.get("status") ?? "draft");
+
+  const s = createSupabaseServer();
+  if (id) {
+    const { error } = await s
+      .from("payrolls")
+      .update({ period_year, period_month, status })
+      .eq("id", id);
+    if (error) throw error;
+  } else {
+    const { error } = await s
+      .from("payrolls")
+      .insert({ period_year, period_month, status });
+    if (error) throw error;
+  }
+  revalidatePath("/payroll");
+  redirect("/payroll");
+}
+
+/** Shim: hay vistas que siguen llamando a "createOrOpenPayrollAction" desde /payroll/new */
+export async function createOrOpenPayrollAction(formData: FormData) {
+  const year = Number(formData.get("year"));
+  const month = Number(formData.get("month"));
+  const id = await generatePayroll(year, month);
+  if (!id) throw new Error("No se pudo generar la nómina");
+  redirect(`/payroll/period/${year}/${month}`);
 }
