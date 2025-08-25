@@ -1,63 +1,84 @@
-'use server';
+"use server";
 
-import { supabaseServer } from '@/lib/supabase/server';
+import { createSupabaseServer } from "@/utils/supabase/server";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { buildPayrollPdf } from "@/utils/pdf/buildPayrollPdf";
+import { uploadPdf } from "@/utils/pdf/upload";
 
-// Utilidad simple de suma “segura”
-const sum = (arr: (number | null | undefined)[]) =>
-  arr.reduce((acc, v) => acc + (Number(v ?? 0)), 0);
-
-// Crea/actualiza la nómina del periodo con los empleados del usuario
-export async function createPayrollAction(formData: FormData) {
-  const month = Number(formData.get('month'));  // 1..12
-  const year  = Number(formData.get('year'));
-
-  const supabase = supabaseServer();
-  const { data: { user }, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !user) throw new Error('No autenticado');
-
-  // Traemos salarios de los empleados del usuario (RLS filtra solo los suyos)
-  const { data: employees, error: empErr } = await supabase
-    .from('employees')
-    .select('salary');
-  if (empErr) throw empErr;
-
-  // Ajusta estas fórmulas a tu modelo real
-  const gross = sum(employees?.map(e => (e as any).salary) ?? []);
-  const net   = Math.round(gross * 0.76 * 100) / 100; // (ejemplo) 24% retenciones+SS
-
-  // upsert por (user_id, year, month)
-  const { error: upErr } = await supabase
-    .from('payrolls')
-    .upsert(
-      [{ period_year: year, period_month: month, gross_total: gross, net_total: net, status: 'processed' }],
-      { onConflict: 'user_id,period_year,period_month' }
-    );
-
-  if (upErr) throw upErr;
+export async function generatePayroll(year: number, month: number) {
+  const supabase = createSupabaseServer();
+  const { data, error } = await supabase.rpc("payroll_generate_period", { p_year: year, p_month: month });
+  if (error) throw error;
+  revalidatePath(`/payroll/${year}/${month}`);
+  return data as string; // payroll_id
 }
 
-export async function markAsPaidAction(id: string) {
-  const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('No autenticado');
+const SaveItemSchema = z.object({
+  id: z.string(),
+  base_gross: z.coerce.number(),
+  irpf_amount: z.coerce.number(),
+  ss_emp_amount: z.coerce.number(),
+  ss_er_amount: z.coerce.number(),
+  net: z.coerce.number(),
+});
 
+export async function saveItem(form: FormData) {
+  const parsed = SaveItemSchema.parse({
+    id: form.get("id"),
+    base_gross: form.get("base_gross"),
+    irpf_amount: form.get("irpf_amount"),
+    ss_emp_amount: form.get("ss_emp_amount"),
+    ss_er_amount: form.get("ss_er_amount"),
+    net: form.get("net"),
+  });
+
+  const supabase = createSupabaseServer();
   const { error } = await supabase
-    .from('payrolls')
-    .update({ status: 'paid' })
-    .eq('id', id)
-    .eq('user_id', user.id); // 🔒 extra guard-rail
+    .from("payroll_items")
+    .update({
+      base_gross: parsed.base_gross,
+      irpf_amount: parsed.irpf_amount,
+      ss_emp_amount: parsed.ss_emp_amount,
+      ss_er_amount: parsed.ss_er_amount,
+      net: parsed.net,
+    })
+    .eq("id", parsed.id);
+
   if (error) throw error;
+  return { ok: true };
 }
 
-export async function deletePayrollAction(id: string) {
-  const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('No autenticado');
+export async function finalizePayroll(payrollId: string) {
+  const supabase = createSupabaseServer();
 
-  const { error } = await supabase
-    .from('payrolls')
-    .delete()
-    .eq('id', id)
-    .eq('user_id', user.id); // 🔒 extra guard-rail
-  if (error) throw error;
+  // Sella la nómina
+  const { error: e1 } = await supabase.rpc("payroll_finalize", { p_payroll: payrollId });
+  if (e1) throw e1;
+
+  // Descarga items + empleados para generar PDFs
+  const { data: header, error: e2 } = await supabase
+    .from("payrolls")
+    .select("*")
+    .eq("id", payrollId)
+    .single();
+  if (e2) throw e2;
+
+  const { data: items, error: e3 } = await supabase
+    .from("payroll_items")
+    .select("*, employees:employee_id (full_name, email)")
+    .eq("payroll_id", payrollId);
+  if (e3) throw e3;
+
+  // Genera y sube un PDF por empleado
+  for (const item of items ?? []) {
+    const pdfBytes = await buildPayrollPdf({ header, item });
+    await uploadPdf({
+      supabase,
+      bytes: pdfBytes,
+      path: `${header.user_id}/${header.period_year}-${String(header.period_month).padStart(2,"0")}/${item.employee_id}.pdf`,
+    });
+  }
+
+  return { ok: true };
 }
