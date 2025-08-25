@@ -2,17 +2,25 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-export function createClient(cookieStore = cookies()) {
-  const supabase = createServerClient(
+/**
+ * Cliente SSR de Supabase (Next.js App Router, runtime Node.js)
+ * - Usa cookies de la request para sesión
+ * - Evita Edge runtime (añade `export const runtime = 'nodejs'` en tus pages)
+ */
+export function createSupabaseServer() {
+  const cookieStore = cookies();
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name) { return cookieStore.get(name)?.value; },
-        set(name, value, options) { cookieStore.set({ name, value, ...options }); },
-        remove(name, options) { cookieStore.set({ name, value: "", ...options }); },
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
       },
     }
   );
-  return supabase;
 }
+
+/** Alias para compatibilidad con imports antiguos: `import { createClient } ...` */
+export const createClient = createSupabaseServer;
