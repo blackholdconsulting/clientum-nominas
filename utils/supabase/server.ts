@@ -1,26 +1,22 @@
 // utils/supabase/server.ts
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
 
-export function createClient() {
-  const cookieStore = cookies();
-
+export const createClient = (cookieStore?: ReturnType<typeof cookies>) => {
+  const c = cookieStore ?? cookies();
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, // <-- ANON, nunca service
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        get: (name: string) => c.get(name)?.value,
+        set: (name: string, value: string, options: CookieOptions) => {
+          c.set({ name, value, ...options });
         },
-        set(name: string, value: string, options: any) {
-          // En Next 15, headers cookies es solo para server y acepta objeto.
-          cookieStore.set({ name, value, ...options });
-        },
-        remove(name: string, options: any) {
-          cookieStore.set({ name, value: '', ...options, maxAge: 0 });
+        remove: (name: string, options: CookieOptions) => {
+          c.set({ name, value: '', ...options });
         },
       },
     }
   );
-}
+};
