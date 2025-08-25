@@ -14,15 +14,11 @@ export default async function EditEmployeePage({
   params: { id: string };
 }) {
   const supabase = getSupabaseServerClient();
-  const user = await requireUser();
+  await requireUser(); // 🔐 asegura sesión (RLS activa)
 
+  // ⬇️ SIN .eq("user_id", user.id): dejamos que la RLS (own OR null) gobierne
   const [{ data: emp }, { data: departments }] = await Promise.all([
-    supabase
-      .from("employees")
-      .select("*")
-      .eq("id", params.id)
-      .eq("user_id", user.id)
-      .maybeSingle(),
+    supabase.from("employees").select("*").eq("id", params.id).maybeSingle(),
     supabase.from("departments").select("id, name").order("name", { ascending: true }),
   ]);
 
@@ -50,7 +46,11 @@ export default async function EditEmployeePage({
 
             <div className="md:col-span-2">
               <label className="block text-sm text-slate-600 mb-1">Nombre completo</label>
-              <Input name="full_name" defaultValue={emp.full_name ?? emp.name ?? ""} required />
+              <Input
+                name="full_name"
+                defaultValue={emp.full_name ?? emp.name ?? [emp.first_name, emp.last_name].filter(Boolean).join(" ")}
+                required
+              />
             </div>
 
             <div>
