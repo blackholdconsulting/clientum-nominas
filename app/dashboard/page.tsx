@@ -24,7 +24,7 @@ export default async function DashboardPage() {
   try {
     const supabase = getSupabaseServerClient();
 
-    // 1) Intentamos leer la vista si existe (no falla si no existe)
+    // 1) Probar la vista si existe
     let employeesCount: number | null = null;
     let lastRunAt: string | null = null;
 
@@ -39,58 +39,91 @@ export default async function DashboardPage() {
       lastRunAt = resume.last_run_at ?? null;
     }
 
-    // 2) Si la vista no existe o no trae datos, calculamos “a la vieja usanza”
+    // 2) Fallback si no hay vista
     if (employeesCount === null) {
-      const { count: eCount, error: eErr } = await supabase
+      const { count } = await supabase
         .from("employees")
         .select("*", { count: "exact", head: true });
-      if (!eErr) employeesCount = eCount ?? 0;
-      else employeesCount = 0; // fallback
+      employeesCount = count ?? 0;
     }
 
     if (lastRunAt === null) {
-      const { data: lastRun, error: rErr } = await supabase
+      const { data: lastRun } = await supabase
         .from("payroll_runs")
         .select("run_date")
         .order("run_date", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (!rErr && lastRun?.run_date) lastRunAt = lastRun.run_date;
+      if (lastRun?.run_date) lastRunAt = lastRun.run_date;
     }
 
     return (
-      <main style={{ maxWidth: 900, margin: "40px auto", padding: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 16 }}>
-          Bienvenido
-        </h1>
+      <main className="mx-auto max-w-5xl px-6 py-10">
+        <h1 className="text-3xl font-bold tracking-tight">Bienvenido</h1>
 
-        <section>
-          <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 8 }}>
-            Resumen de nóminas
-          </h2>
-          <p>Empleados: {employeesCount ?? 0}</p>
-          <p>Última nómina: {lastRunAt ? new Date(lastRunAt).toLocaleString() : "—"}</p>
-
-          <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
-            <Link href="/employees">Ver empleados</Link>
-            <Link href="/contracts/models">Plantillas de contrato</Link>
+        <div className="mt-6 grid gap-6 sm:grid-cols-2">
+          {/* Card empleados */}
+          <div className="rounded-2xl border bg-white/50 p-6 shadow-sm backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+            <p className="text-sm text-zinc-500">Empleados</p>
+            <p className="mt-2 text-4xl font-semibold">{employeesCount ?? 0}</p>
+            <p className="mt-1 text-xs text-zinc-400">
+              Total de empleados de tu organización
+            </p>
           </div>
 
-          <p style={{ marginTop: 16, fontSize: 12, color: "#555" }}>
-            Si el problema persiste, revisa los logs del servidor o{" "}
-            <Link href="/api/diag">/api/diag</Link>.
-          </p>
-        </section>
+          {/* Card última nómina */}
+          <div className="rounded-2xl border bg-white/50 p-6 shadow-sm backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+            <p className="text-sm text-zinc-500">Última nómina</p>
+            <p className="mt-2 text-2xl font-semibold">
+              {lastRunAt ? new Date(lastRunAt).toLocaleString() : "—"}
+            </p>
+            <p className="mt-1 text-xs text-zinc-400">
+              Fecha del último proceso registrado
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link
+            href="/employees"
+            className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+          >
+            Ver empleados
+          </Link>
+          <Link
+            href="/contracts/models"
+            className="rounded-xl border px-4 py-2 text-sm font-medium transition hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/50"
+          >
+            Plantillas de contrato
+          </Link>
+        </div>
+
+        <p className="mt-6 text-xs text-zinc-400">
+          Si el problema persiste, revisa los logs del servidor o{" "}
+          <Link href="/api/diag" className="underline">
+            /api/diag
+          </Link>
+          .
+        </p>
       </main>
     );
-  } catch (err) {
-    // NUNCA rompas el SSR: devuelve una pantalla segura
+  } catch {
+    // Pantalla segura si algo peta
     return (
-      <main style={{ maxWidth: 900, margin: "40px auto", padding: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700 }}>Ha ocurrido un error</h1>
-        <p>El dashboard no pudo cargar. Revisa /api/diag para más detalle.</p>
-        <div style={{ marginTop: 12 }}>
-          <Link href="/">Ir al inicio</Link>
+      <main className="mx-auto max-w-3xl px-6 py-10">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-800 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+          <h2 className="text-lg font-semibold">Ha ocurrido un error</h2>
+          <p className="mt-2 text-sm">
+            El dashboard no pudo cargar. Revisa <code>/api/diag</code> para más detalles.
+          </p>
+          <div className="mt-4">
+            <Link
+              href="/"
+              className="rounded-lg bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-700"
+            >
+              Ir al inicio
+            </Link>
+          </div>
         </div>
       </main>
     );
