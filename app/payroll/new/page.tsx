@@ -1,56 +1,38 @@
 // app/payroll/new/page.tsx
-import { redirect } from 'next/navigation';
-import { supabaseServer } from '@/lib/supabase/server'; // ajusta si tu helper está en otro path
+import { createClient } from '@/utils/supabase/server';
+import { cookies } from 'next/headers';
 import NewPayrollClient from './ui/NewPayrollClient';
 
-export const dynamic = 'force-dynamic';
-
 export default async function NewPayrollPage() {
-  const supabase = supabaseServer();
+  const cookieStore = await cookies();
+  const supabase = createClient(cookieStore);
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError) {
-    return (
-      <main className="p-6">
-        <h1 className="text-2xl font-semibold mb-2">Crear Nueva Nómina</h1>
-        <p className="text-red-600">Error de autenticación: {authError.message}</p>
-      </main>
-    );
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) {
+    // si quieres redireccionar a login, o muestra un mensaje
+    return <div>Debes iniciar sesión</div>;
   }
 
-  if (!user) redirect('/login');
-
-  // RLS ya protege, pero añadimos filtro por claridad
+  // ⚠️ Consulta mínima: SOLO por user_id (sin más filtros)
   const { data: employees, error } = await supabase
     .from('employees')
-    .select('id, first_name, last_name, position, salary, created_at')
+    .select(
+      'id, first_name, last_name, email, position, salary_base, start_date'
+    )
     .eq('user_id', user.id)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false });
 
   if (error) {
-    return (
-      <main className="p-6">
-        <h1 className="text-2xl font-semibold mb-2">Crear Nueva Nómina</h1>
-        <p className="text-red-600">Error cargando empleados: {error.message}</p>
-      </main>
-    );
+    return <div>Error cargando empleados: {error.message}</div>;
   }
 
   return (
     <NewPayrollClient
       userEmail={user.email ?? ''}
-      employees={
-        (employees ?? []).map((e) => ({
-          id: e.id,
-          name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(),
-          position: e.position ?? '',
-          salary: Number(e.salary ?? 0),
-        })) as Array<{ id: string; name: string; position: string; salary: number }>
-      }
+      userId={user.id}
+      initialEmployees={employees ?? []}
+      initialMonth={new Date().getMonth() + 1}
+      initialYear={new Date().getFullYear()}
     />
   );
 }
