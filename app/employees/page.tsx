@@ -12,10 +12,11 @@ import { Input } from "@/components/ui/input";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import DepartmentSelect from "@/components/employees/DepartmentSelect";
+import DeleteEmployeeButton from "@/components/employees/DeleteEmployeeButton";
 
 export const dynamic = "force-dynamic";
 
-// Helpers para no depender de columnas concretas
+// Helpers
 function displayName(e: any) {
   const byParts = [e.first_name, e.last_name].filter(Boolean).join(" ");
   return (e.full_name || e.name || byParts || e.email || "—") as string;
@@ -30,28 +31,21 @@ export default async function EmployeesPage({
   searchParams?: { q?: string; department?: string };
 }) {
   const supabase = getSupabaseServerClient();
-  await requireUser(); // 🔐 asegura sesión (RLS funciona)
+  await requireUser();
 
   const q = (searchParams?.q ?? "").trim().toLowerCase();
   const filterDept = (searchParams?.department ?? "").trim();
 
-  // Departamentos
   const { data: departments } = await supabase
     .from("departments")
     .select("id, name")
     .order("name", { ascending: true });
 
-  // ❗️Sin filtros de user_id: dejamos que RLS devuelva lo permitido
-  let empQuery = supabase
-    .from("employees")
-    .select("*")
-    .order("created_at", { ascending: false });
-
+  let empQuery = supabase.from("employees").select("*").order("created_at", { ascending: false });
   if (filterDept) empQuery = empQuery.eq("department_id", filterDept);
 
   const { data: rawEmployees, error } = await empQuery;
 
-  // Búsqueda por nombre
   const employees = (rawEmployees ?? []).filter((e) =>
     q ? displayName(e).toLowerCase().includes(q) : true
   );
@@ -66,19 +60,8 @@ export default async function EmployeesPage({
           href="/employees/new"
           className="inline-flex items-center gap-2 rounded-md bg-clientum-blue hover:bg-clientum-blueDark text-white px-3 py-2 text-sm"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-4 w-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <path
-              d="M12 5v14M5 12h14"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M12 5v14M5 12h14" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           Nuevo
         </a>
@@ -88,17 +71,8 @@ export default async function EmployeesPage({
       <Card className="shadow-clientum mb-4">
         <CardContent className="p-4">
           <form className="flex flex-col md:flex-row items-center gap-3">
-            <Input
-              name="q"
-              placeholder="Buscar por nombre…"
-              defaultValue={searchParams?.q ?? ""}
-              className="w-full md:w-64"
-            />
-            <select
-              name="department"
-              defaultValue={filterDept}
-              className="border rounded-md px-2 py-2 text-sm bg-white"
-            >
+            <Input name="q" placeholder="Buscar por nombre…" defaultValue={searchParams?.q ?? ""} className="w-full md:w-64" />
+            <select name="department" defaultValue={filterDept} className="border rounded-md px-2 py-2 text-sm bg-white">
               <option value="">Todos los departamentos</option>
               {(departments ?? []).map((d) => (
                 <option key={d.id} value={d.id}>
@@ -106,9 +80,7 @@ export default async function EmployeesPage({
                 </option>
               ))}
             </select>
-            <button className="rounded-md px-3 py-2 bg-clientum-blue hover:bg-clientum-blueDark text-white">
-              Filtrar
-            </button>
+            <button className="rounded-md px-3 py-2 bg-clientum-blue hover:bg-clientum-blueDark text-white">Filtrar</button>
           </form>
         </CardContent>
       </Card>
@@ -123,18 +95,19 @@ export default async function EmployeesPage({
                 <TableHead>Puesto</TableHead>
                 <TableHead>Departamento</TableHead>
                 <TableHead>Alta</TableHead>
+                <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {error ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-red-600">
+                  <TableCell colSpan={5} className="text-red-600">
                     {error.message}
                   </TableCell>
                 </TableRow>
               ) : !employees || employees.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-10 text-slate-500">
+                  <TableCell colSpan={5} className="text-center py-10 text-slate-500">
                     No hay empleados.
                   </TableCell>
                 </TableRow>
@@ -150,16 +123,22 @@ export default async function EmployeesPage({
                       <DepartmentSelect
                         employeeId={e.id}
                         currentId={e.department_id}
-                        departments={(departments ?? []).map((d) => ({
-                          id: d.id,
-                          name: d.name,
-                        }))}
+                        departments={(departments ?? []).map((d) => ({ id: d.id, name: d.name }))}
                       />
                     </TableCell>
                     <TableCell>
-                      {e.created_at
-                        ? new Date(e.created_at as any).toLocaleString()
-                        : "—"}
+                      {e.created_at ? new Date(e.created_at as any).toLocaleString() : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <a
+                          href={`/employees/${e.id}/edit`}
+                          className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
+                        >
+                          Editar
+                        </a>
+                        <DeleteEmployeeButton id={e.id} />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
