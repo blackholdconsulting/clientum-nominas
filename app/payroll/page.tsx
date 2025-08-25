@@ -1,223 +1,173 @@
-"use client"
+// app/payroll/page.tsx
+import { supabaseServer } from '@/lib/supabase/server';
+import { createPayrollAction, deletePayrollAction, markAsPaidAction } from './actions';
+import { revalidatePath } from 'next/cache';
 
-import { ProtectedRoute } from "@/components/auth/protected-route"
-import { AuthProvider } from "@/components/auth/auth-provider"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Calculator, Plus, Search, Download, Eye, Calendar } from "lucide-react"
-import Link from "next/link"
-import { useState } from "react"
-
-const mockPayrollRuns = [
-  {
-    id: "1",
-    period: "Diciembre 2024",
-    status: "Procesada",
-    employees: 12,
-    totalGross: 45600.0,
-    totalNet: 34200.0,
-    processedDate: "2024-12-28",
-    dueDate: "2024-12-31",
-  },
-  {
-    id: "2",
-    period: "Noviembre 2024",
-    status: "Pagada",
-    employees: 12,
-    totalGross: 45600.0,
-    totalNet: 34200.0,
-    processedDate: "2024-11-28",
-    dueDate: "2024-11-30",
-  },
-  {
-    id: "3",
-    period: "Octubre 2024",
-    status: "Pagada",
-    employees: 11,
-    totalGross: 41800.0,
-    totalNet: 31350.0,
-    processedDate: "2024-10-28",
-    dueDate: "2024-10-31",
-  },
-]
-
-function PayrollContent() {
-  const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-
-  const filteredPayrolls = mockPayrollRuns.filter((payroll) => {
-    const matchesSearch = payroll.period.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStatus = statusFilter === "all" || payroll.status.toLowerCase() === statusFilter.toLowerCase()
-    return matchesSearch && matchesStatus
-  })
-
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "procesada":
-        return "secondary"
-      case "pagada":
-        return "default"
-      case "pendiente":
-        return "destructive"
-      default:
-        return "outline"
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link href="/dashboard" className="flex items-center space-x-2">
-                <Calculator className="h-8 w-8 text-primary" />
-                <h1 className="text-2xl font-bold font-serif text-primary">Clientum Nóminas</h1>
-              </Link>
-              <Badge variant="secondary">Nóminas</Badge>
-            </div>
-            <Button asChild>
-              <Link href="/payroll/new">
-                <Plus className="h-4 w-4 mr-2" />
-                Nueva Nómina
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold font-serif mb-2">Gestión de Nóminas</h2>
-          <p className="text-muted-foreground">Procesa y gestiona las nóminas de tus empleados</p>
-        </div>
-
-        {/* Stats Cards */}
-        <div className="grid md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Empleados</CardTitle>
-              <div className="text-2xl font-bold">12</div>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Nómina Bruta</CardTitle>
-              <div className="text-2xl font-bold">€45.600</div>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Nómina Neta</CardTitle>
-              <div className="text-2xl font-bold">€34.200</div>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Próximo Pago</CardTitle>
-              <div className="text-2xl font-bold">31 Dic</div>
-            </CardHeader>
-          </Card>
-        </div>
-
-        {/* Filters */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Filtros</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar por período..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full md:w-48">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos los estados</SelectItem>
-                  <SelectItem value="procesada">Procesada</SelectItem>
-                  <SelectItem value="pagada">Pagada</SelectItem>
-                  <SelectItem value="pendiente">Pendiente</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Payroll List */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Nóminas Procesadas</CardTitle>
-            <CardDescription>Historial de nóminas procesadas y pendientes</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {filteredPayrolls.map((payroll) => (
-                <div
-                  key={payroll.id}
-                  className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-center space-x-4">
-                    <div className="flex items-center justify-center w-12 h-12 bg-primary/10 rounded-lg">
-                      <Calendar className="h-6 w-6 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold">{payroll.period}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {payroll.employees} empleados • Procesada:{" "}
-                        {new Date(payroll.processedDate).toLocaleDateString("es-ES")}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-4">
-                    <div className="text-right">
-                      <p className="font-semibold">
-                        €{payroll.totalNet.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
-                      </p>
-                      <p className="text-sm text-muted-foreground">Neto</p>
-                    </div>
-                    <Badge variant={getStatusColor(payroll.status)}>{payroll.status}</Badge>
-                    <div className="flex space-x-2">
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`/payroll/${payroll.id}`}>
-                          <Eye className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button variant="outline" size="sm">
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </main>
-    </div>
-  )
+function currency(n: number | null | undefined) {
+  const v = Number(n ?? 0);
+  return v.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 }
 
-export default function PayrollPage() {
+function monthName(m: number) {
+  return new Date(2000, m - 1, 1).toLocaleDateString('es-ES', { month: 'long' });
+}
+
+async function getData() {
+  const supabase = supabaseServer();
+
+  // Usuario actual
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { user: null, employeesCount: 0, last: null, periods: [] as any[] };
+
+  // Total empleados (RLS ya filtra por user_id)
+  const { count: employeesCount } = await supabase
+    .from('employees')
+    .select('id', { count: 'exact', head: true });
+
+  // Periodos de nómina (ordenados por fecha desc)
+  const { data: periods } = await supabase
+    .from('payrolls')
+    .select('id, period_year, period_month, gross_total, net_total, status, created_at')
+    .order('period_year', { ascending: false })
+    .order('period_month', { ascending: false });
+
+  const last = periods?.[0] ?? null;
+
+  return { user, employeesCount: employeesCount ?? 0, last, periods: periods ?? [] };
+}
+
+export default async function PayrollPage() {
+  const { user, employeesCount, last, periods } = await getData();
+
+  if (!user) {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <h1 className="text-2xl font-semibold mb-4">Gestión de Nóminas</h1>
+        <p className="text-sm text-muted-foreground">Debes iniciar sesión.</p>
+      </div>
+    );
+  }
+
+  // Próximo pago = último día del mes actual (puedes ajustarlo)
+  const now = new Date();
+  const nextPay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    .toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+
   return (
-    <AuthProvider>
-      <ProtectedRoute>
-        <PayrollContent />
-      </ProtectedRoute>
-    </AuthProvider>
-  )
+    <div className="max-w-6xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Clientum Nóminas</h1>
+          <p className="text-sm text-muted-foreground">Nóminas</p>
+        </div>
+
+        {/* Crear nómina (periodo por defecto: mes actual) */}
+        <form action={async (fd) => {
+          'use server';
+          await createPayrollAction(fd);
+          revalidatePath('/payroll');
+        }}>
+          <input type="hidden" name="month" value={now.getMonth() + 1} />
+          <input type="hidden" name="year" value={now.getFullYear()} />
+          <button
+            className="inline-flex items-center gap-2 rounded-md bg-clientum-blue px-4 py-2 text-white shadow-clientum hover:bg-clientum-blueDark"
+            type="submit"
+          >
+            + Nueva Nómina
+          </button>
+        </form>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-xl border p-4">
+          <p className="text-sm text-muted-foreground">Total Empleados</p>
+          <p className="text-2xl font-semibold mt-1">{employeesCount}</p>
+        </div>
+        <div className="rounded-xl border p-4">
+          <p className="text-sm text-muted-foreground">Nómina Bruta</p>
+          <p className="text-2xl font-semibold mt-1">{currency(last?.gross_total)}</p>
+        </div>
+        <div className="rounded-xl border p-4">
+          <p className="text-sm text-muted-foreground">Nómina Neta</p>
+          <p className="text-2xl font-semibold mt-1">{currency(last?.net_total)}</p>
+        </div>
+        <div className="rounded-xl border p-4">
+          <p className="text-sm text-muted-foreground">Próximo Pago</p>
+          <p className="text-2xl font-semibold mt-1">{nextPay}</p>
+        </div>
+      </div>
+
+      {/* Historial */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Nóminas Procesadas</h2>
+        <p className="text-sm text-muted-foreground">
+          Historial de nóminas procesadas y pendientes
+        </p>
+
+        <div className="divide-y rounded-xl border">
+          {periods.length === 0 && (
+            <div className="p-6 text-sm text-muted-foreground">Aún no hay nóminas.</div>
+          )}
+
+          {periods.map((p) => (
+            <div key={p.id} className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium">
+                  {monthName(p.period_month)} {p.period_year}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {/* Puedes sumarizar aquí: empleados y fecha procesada si quieres */}
+                  Procesada: {new Date(p.created_at).toLocaleDateString('es-ES')}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-6">
+                <div className="text-right">
+                  <div className="text-sm text-muted-foreground">Neto</div>
+                  <div className="font-medium">{currency(p.net_total)}</div>
+                </div>
+
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    p.status === 'paid'
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-amber-100 text-amber-700'
+                  }`}
+                >
+                  {p.status === 'paid' ? 'Pagada' : 'Procesada'}
+                </span>
+
+                <div className="flex items-center gap-2">
+                  {/* Marcar como pagada */}
+                  {p.status !== 'paid' && (
+                    <form action={async () => {
+                      'use server';
+                      await markAsPaidAction(p.id);
+                      revalidatePath('/payroll');
+                    }}>
+                      <button className="rounded-md border px-3 py-1 text-sm hover:bg-gray-50">
+                        Marcar pagada
+                      </button>
+                    </form>
+                  )}
+
+                  {/* Borrar nómina */}
+                  <form action={async () => {
+                    'use server';
+                    await deletePayrollAction(p.id);
+                    revalidatePath('/payroll');
+                  }}>
+                    <button className="rounded-md border px-3 py-1 text-sm text-red-600 hover:bg-red-50">
+                      Eliminar
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
