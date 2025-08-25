@@ -8,17 +8,23 @@ import DepartmentSelect from "@/components/employees/DepartmentSelect";
 
 export const dynamic = "force-dynamic";
 
+function displayName(e: any) {
+  const byParts = [e.first_name, e.last_name].filter(Boolean).join(" ");
+  return (e.full_name || e.name || byParts || e.email || "—") as string;
+}
+function displayPosition(e: any) {
+  return (e.position || e.job_title || e.cargo || "—") as string;
+}
+
 export default async function EmployeesPage({
   searchParams,
 }: {
   searchParams: { q?: string; department?: string };
 }) {
   const supabase = getSupabaseServerClient();
-
-  // 🔐 Asegura sesión (si no hay, redirige a /auth)
   const user = await requireUser();
 
-  const q = (searchParams?.q ?? "").trim();
+  const q = (searchParams?.q ?? "").trim().toLowerCase();
   const filterDept = (searchParams?.department ?? "").trim();
 
   // Departamentos
@@ -27,19 +33,21 @@ export default async function EmployeesPage({
     .select("id, name")
     .order("name", { ascending: true });
 
-  // Empleados del usuario actual
-  // 👉 Mientras haces backfill, permitimos también ver filas sin user_id:
-  //    cuando termines el backfill, cambia .or(...) por .eq("user_id", user.id)
+  // Empleados visibles por RLS (dueño o sin asignar, mientras haces backfill)
   let query = supabase
     .from("employees")
-    .select("id, full_name, email, phone, position, department_id, created_at")
+    .select("*")
     .or(`user_id.eq.${user.id},user_id.is.null`)
     .order("created_at", { ascending: false });
 
-  if (q) query = query.ilike("full_name", `%${q}%`);
   if (filterDept) query = query.eq("department_id", filterDept);
 
-  const { data: employees, error } = await query;
+  const { data: raw, error } = await query;
+
+  // Filtro por nombre en servidor (evitamos depender de una columna concreta)
+  const employees = (raw ?? []).filter((e) =>
+    q ? displayName(e).toLowerCase().includes(q) : true
+  );
 
   return (
     <main className="max-w-6xl mx-auto p-4 md:p-6">
@@ -56,7 +64,7 @@ export default async function EmployeesPage({
             <Input
               name="q"
               placeholder="Buscar por nombre…"
-              defaultValue={q}
+              defaultValue={searchParams?.q ?? ""}
               className="w-full md:w-64"
             />
             <select
@@ -104,15 +112,13 @@ export default async function EmployeesPage({
                   </TableCell>
                 </TableRow>
               ) : (
-                employees.map((e) => (
+                employees.map((e: any) => (
                   <TableRow key={e.id}>
                     <TableCell className="font-medium">
-                      <div>{e.full_name}</div>
-                      <div className="text-xs text-slate-500">
-                        {e.email ?? ""}
-                      </div>
+                      <div>{displayName(e)}</div>
+                      <div className="text-xs text-slate-500">{e.email ?? ""}</div>
                     </TableCell>
-                    <TableCell>{e.position ?? "-"}</TableCell>
+                    <TableCell>{displayPosition(e)}</TableCell>
                     <TableCell>
                       <DepartmentSelect
                         employeeId={e.id}
