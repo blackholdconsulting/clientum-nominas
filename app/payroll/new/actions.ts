@@ -1,57 +1,46 @@
 // app/payroll/new/actions.ts
 'use server';
 
-import { revalidatePath } from 'next/cache';
-import { supabaseServer } from '@/lib/supabase/server';
+import { createClient } from '@/utils/supabase/server';
 
-type Row = {
-  employee_id: string;
-  gross_total: number;
-  net_total: number;
-  base_cc?: number;
-  base_at?: number;
-  irpf_pct?: number;
-  ss_employee?: number;
-  ss_employer?: number;
-  extras?: Record<string, number>;
-  pay_date?: string | null;
-};
+type Employee = { id: string; salary_base?: number };
 
-export async function processPayroll(formData: FormData) {
-  const year  = Number(formData.get('year'));
-  const month = Number(formData.get('month'));
-  const rows  = JSON.parse(String(formData.get('rows') ?? '[]')) as Row[];
+export async function processPayrollAction({
+  month,   // 1..12
+  year,    // 2025
+  employees,
+}: { month: number; year: number; employees: Employee[] }) {
+  const supabase = createClient();
 
-  const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('No auth');
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('No autenticado');
 
-  // payload a insertar
-  const toUpsert = rows.map(r => ({
-    user_id:      user.id,
-    employee_id:  r.employee_id,
-    period_year:  year,
-    period_month: month,
-    gross_total:  r.gross_total ?? 0,
-    net_total:    r.net_total ?? 0,
-    base_cc:      r.base_cc ?? 0,
-    base_at:      r.base_at ?? 0,
-    irpf_pct:     r.irpf_pct ?? 0,
-    ss_employee:  r.ss_employee ?? 0,
-    ss_employer:  r.ss_employer ?? 0,
-    extras:       r.extras ?? {},
-    status:       'processed',
-    pay_date:     r.pay_date ?? null
-  }));
+  // Cálculo simple de totales (ajústalo a tu lógica real)
+  const grossTotal = employees.reduce((s, e) => s + (e.salary_base ?? 0), 0);
+  const irpf = 0.15;
+  const ss   = 0.063;
+  const netTotal = grossTotal - grossTotal * (irpf + ss);
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('payrolls')
-    .upsert(toUpsert, {
-      onConflict: 'user_id,employee_id,period_year,period_month'
-    });
+    .insert({
+      user_id: user.id,          // <- CLAVE para RLS
+      period_year: year,
+      period_month: month,
+      gross_total: grossTotal,
+      net_total: netTotal,
+      status: 'processed',
+    })
+    .select()
+    .single();
 
-  if (error) throw error;
+  if (error) {
+    // si choca con el índice único de mes/año
+    if ((error as any).code === '23505') {
+      throw new Error('Ya tienes una nómina para ese periodo.');
+    }
+    throw new Error(error.message);
+  }
 
-  revalidatePath('/payroll');   // refresca dashboard/resumen
-  return { ok: true };
+  return data; // úsalo para redirigir al detalle, etc.
 }
