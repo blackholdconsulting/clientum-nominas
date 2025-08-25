@@ -12,11 +12,12 @@ import { Input } from "@/components/ui/input";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import DepartmentSelect from "@/components/employees/DepartmentSelect";
+import DeleteEmployeeButton from "@/components/employees/DeleteEmployeeButton";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-// Helpers de presentación (no dependemos de columnas exactas)
+// Helpers de presentación (no dependemos de nombres exactos)
 function displayName(e: any) {
   const byParts = [e.first_name, e.last_name].filter(Boolean).join(" ");
   return (e.full_name || e.name || byParts || e.email || "—") as string;
@@ -47,6 +48,7 @@ export default async function EmployeesPage({
     ascending: false,
   });
   if (filterDept) empQuery = empQuery.eq("department_id", filterDept);
+
   const { data: rawEmployees, error } = await empQuery;
 
   const employees = (rawEmployees ?? []).filter((e) =>
@@ -65,6 +67,7 @@ export default async function EmployeesPage({
         </div>
 
         <Link
+          prefetch={false}
           href="/employees/new"
           className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium bg-clientum-blue hover:bg-clientum-blueDark text-white shadow-clientum"
         >
@@ -86,7 +89,7 @@ export default async function EmployeesPage({
         </Link>
       </div>
 
-      {/* Tarjeta de filtros (estética Clientum) */}
+      {/* Tarjeta de filtros */}
       <Card className="shadow-clientum border border-slate-200/70 mb-5">
         <CardContent className="p-4 md:p-5">
           <form className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3 items-center">
@@ -117,7 +120,7 @@ export default async function EmployeesPage({
         </CardContent>
       </Card>
 
-      {/* Tabla con zebra + hover y acciones al estilo Clientum */}
+      {/* Tabla con zebra + hover y acciones */}
       <Card className="shadow-clientum border border-slate-200/70">
         <CardContent className="p-0">
           <Table>
@@ -188,32 +191,13 @@ export default async function EmployeesPage({
                     <TableCell className="align-middle">
                       <div className="flex justify-end gap-2">
                         <Link
+                          prefetch={false}
                           href={`/employees/${e.id}/edit`}
                           className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
                         >
                           Editar
                         </Link>
-                        <form
-                          action={"/employees/delete"} // no se usa; el botón es client
-                          onSubmit={(ev) => ev.preventDefault()}
-                        >
-                          <button
-                            formAction={undefined}
-                            data-id={e.id}
-                            // Estilo “danger outline” Clientum
-                            className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-                            onClick={(ev) => {
-                              ev.preventDefault();
-                              // delega al botón client real si lo tienes; aquí mantenemos el estilo
-                              const btn = document.querySelector<HTMLButtonElement>(
-                                `button[data-delete="${e.id}"]`
-                              );
-                              btn?.click();
-                            }}
-                          >
-                            Eliminar
-                          </button>
-                        </form>
+                        <DeleteEmployeeButton id={e.id} />
                       </div>
                     </TableCell>
                   </TableRow>
