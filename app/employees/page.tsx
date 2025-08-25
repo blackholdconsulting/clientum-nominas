@@ -1,6 +1,13 @@
 import BackButton from "@/components/BackButton";
 import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
@@ -8,6 +15,7 @@ import DepartmentSelect from "@/components/employees/DepartmentSelect";
 
 export const dynamic = "force-dynamic";
 
+// Helpers para no depender de nombres exactos de columnas
 function displayName(e: any) {
   const byParts = [e.first_name, e.last_name].filter(Boolean).join(" ");
   return (e.full_name || e.name || byParts || e.email || "—") as string;
@@ -19,48 +27,69 @@ function displayPosition(e: any) {
 export default async function EmployeesPage({
   searchParams,
 }: {
-  searchParams: { q?: string; department?: string };
+  searchParams?: { q?: string; department?: string };
 }) {
   const supabase = getSupabaseServerClient();
-  const user = await requireUser();
+  const user = await requireUser(); // asegura sesión
 
   const q = (searchParams?.q ?? "").trim().toLowerCase();
   const filterDept = (searchParams?.department ?? "").trim();
 
-  // Departamentos
+  // Departamentos para filtro y selector por fila
   const { data: departments } = await supabase
     .from("departments")
     .select("id, name")
     .order("name", { ascending: true });
 
-  // Empleados visibles por RLS (dueño o sin asignar, mientras haces backfill)
-  let query = supabase
+  // Empleados visibles por RLS (del usuario o sin asignar mientras haces backfill)
+  // Cuando termines de asignar user_id, cambia la línea .or(...) por .eq("user_id", user.id)
+  let empQuery = supabase
     .from("employees")
     .select("*")
     .or(`user_id.eq.${user.id},user_id.is.null`)
     .order("created_at", { ascending: false });
 
-  if (filterDept) query = query.eq("department_id", filterDept);
+  if (filterDept) empQuery = empQuery.eq("department_id", filterDept);
 
-  const { data: raw, error } = await query;
+  const { data: rawEmployees, error } = await empQuery;
 
-  // Filtro por nombre en servidor (evitamos depender de una columna concreta)
-  const employees = (raw ?? []).filter((e) =>
+  // Búsqueda por nombre en servidor (evita depender de columna concreta)
+  const employees = (rawEmployees ?? []).filter((e) =>
     q ? displayName(e).toLowerCase().includes(q) : true
   );
 
   return (
     <main className="max-w-6xl mx-auto p-4 md:p-6">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <BackButton />
         <h1 className="text-xl font-semibold text-slate-900">Empleados</h1>
-        <div />
+        <a
+          href="/employees/new"
+          className="inline-flex items-center gap-2 rounded-md bg-clientum-blue hover:bg-clientum-blueDark text-white px-3 py-2 text-sm"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+          >
+            <path
+              d="M12 5v14M5 12h14"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Nuevo
+        </a>
       </div>
 
       {/* Filtros */}
       <Card className="shadow-clientum mb-4">
-        <CardContent className="p-4 flex flex-col md:flex-row gap-3">
-          <form className="flex items-center gap-2 w-full md:w-auto">
+        <CardContent className="p-4">
+          <form className="flex flex-col md:flex-row items-center gap-3">
             <Input
               name="q"
               placeholder="Buscar por nombre…"
@@ -70,7 +99,7 @@ export default async function EmployeesPage({
             <select
               name="department"
               defaultValue={filterDept}
-              className="border rounded-md px-2 py-1"
+              className="border rounded-md px-2 py-2 text-sm bg-white"
             >
               <option value="">Todos los departamentos</option>
               {(departments ?? []).map((d) => (
@@ -107,7 +136,10 @@ export default async function EmployeesPage({
                 </TableRow>
               ) : !employees || employees.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-10 text-slate-500">
+                  <TableCell
+                    colSpan={4}
+                    className="text-center py-10 text-slate-500"
+                  >
                     No hay empleados.
                   </TableCell>
                 </TableRow>
@@ -116,7 +148,9 @@ export default async function EmployeesPage({
                   <TableRow key={e.id}>
                     <TableCell className="font-medium">
                       <div>{displayName(e)}</div>
-                      <div className="text-xs text-slate-500">{e.email ?? ""}</div>
+                      <div className="text-xs text-slate-500">
+                        {e.email ?? ""}
+                      </div>
                     </TableCell>
                     <TableCell>{displayPosition(e)}</TableCell>
                     <TableCell>
