@@ -15,7 +15,7 @@ import DepartmentSelect from "@/components/employees/DepartmentSelect";
 
 export const dynamic = "force-dynamic";
 
-// Helpers para no depender de nombres exactos de columnas
+// Helpers para no depender de columnas concretas
 function displayName(e: any) {
   const byParts = [e.first_name, e.last_name].filter(Boolean).join(" ");
   return (e.full_name || e.name || byParts || e.email || "—") as string;
@@ -30,30 +30,28 @@ export default async function EmployeesPage({
   searchParams?: { q?: string; department?: string };
 }) {
   const supabase = getSupabaseServerClient();
-  const user = await requireUser(); // asegura sesión
+  await requireUser(); // 🔐 asegura sesión (RLS funciona)
 
   const q = (searchParams?.q ?? "").trim().toLowerCase();
   const filterDept = (searchParams?.department ?? "").trim();
 
-  // Departamentos para filtro y selector por fila
+  // Departamentos
   const { data: departments } = await supabase
     .from("departments")
     .select("id, name")
     .order("name", { ascending: true });
 
-  // Empleados visibles por RLS (del usuario o sin asignar mientras haces backfill)
-  // Cuando termines de asignar user_id, cambia la línea .or(...) por .eq("user_id", user.id)
+  // ❗️Sin filtros de user_id: dejamos que RLS devuelva lo permitido
   let empQuery = supabase
     .from("employees")
     .select("*")
-    .or(`user_id.eq.${user.id},user_id.is.null`)
     .order("created_at", { ascending: false });
 
   if (filterDept) empQuery = empQuery.eq("department_id", filterDept);
 
   const { data: rawEmployees, error } = await empQuery;
 
-  // Búsqueda por nombre en servidor (evita depender de columna concreta)
+  // Búsqueda por nombre
   const employees = (rawEmployees ?? []).filter((e) =>
     q ? displayName(e).toLowerCase().includes(q) : true
   );
@@ -136,10 +134,7 @@ export default async function EmployeesPage({
                 </TableRow>
               ) : !employees || employees.length === 0 ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={4}
-                    className="text-center py-10 text-slate-500"
-                  >
+                  <TableCell colSpan={4} className="text-center py-10 text-slate-500">
                     No hay empleados.
                   </TableCell>
                 </TableRow>
@@ -148,9 +143,7 @@ export default async function EmployeesPage({
                   <TableRow key={e.id}>
                     <TableCell className="font-medium">
                       <div>{displayName(e)}</div>
-                      <div className="text-xs text-slate-500">
-                        {e.email ?? ""}
-                      </div>
+                      <div className="text-xs text-slate-500">{e.email ?? ""}</div>
                     </TableCell>
                     <TableCell>{displayPosition(e)}</TableCell>
                     <TableCell>
