@@ -25,11 +25,10 @@ export default function DepartmentSelect({
 
   return (
     <select
-      className="border rounded-md px-2 py-1 text-sm bg-white"
+      className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-clientum-blue/60 focus:border-clientum-blue disabled:opacity-60"
       defaultValue={currentId ?? ""}
       onChange={onChange}
       disabled={pending}
-      aria-label="Seleccionar departamento"
     >
       <option value="">Sin depto.</option>
       {departments.map((d) => (
