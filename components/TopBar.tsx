@@ -7,11 +7,11 @@ import { usePathname } from "next/navigation";
 const nav = [
   { name: "Dashboard", href: "/dashboard" },
   { name: "Empleados", href: "/employees" },
-  { name: "Nóminas", href: "/payroll" },
-  { name: "Plantillas", href: "/contracts/models" },
-  { name: "Empresas", href: "/org/select" },        // ajusta si usas otro path
-  { name: "Documentos", href: "/documents" },       // opcional, si existe
-  { name: "Ajustes", href: "/settings" },           // opcional
+  { name: "Nóminas", href: "/payrolls" },            // si tu ruta es /payroll, cámbialo
+  { name: "Plantillas", href: "/contracts" },        // si usas /contracts/models, cámbialo aquí
+  { name: "Departamentos", href: "/departments" },   // <— antes: Empresas → /org/select
+  { name: "Documentos", href: "/documents" },
+  { name: "Ajustes", href: "/settings" },
 ];
 
 export default function TopBar() {
@@ -23,7 +23,7 @@ export default function TopBar() {
         <div className="flex items-center gap-3">
           <Link href="/dashboard" className="flex items-center gap-2">
             <Image
-              src="/logo-clientum.png" // coloca tu logo en /public/logo-clientum.png
+              src="/logo-clientum.png"
               alt="Clientum"
               width={28}
               height={28}
@@ -35,7 +35,10 @@ export default function TopBar() {
 
         <nav className="hidden md:flex items-center gap-2">
           {nav.map((item) => {
-            const active = pathname === item.href;
+            const active =
+              pathname === item.href ||
+              (item.href !== "/dashboard" && pathname.startsWith(item.href + "/"));
+
             return (
               <Link
                 key={item.href}
