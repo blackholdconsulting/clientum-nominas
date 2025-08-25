@@ -1,20 +1,16 @@
-// app/layout.tsx
 import "./globals.css";
-import type { Metadata } from "next";
+import TopBar from "@/components/TopBar";
 
-export const metadata: Metadata = {
-  title: "Clientum Nóminas",
-  description: "Dashboard",
+export const metadata = {
+  title: "Clientum",
+  description: "Gestión de nóminas",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className="h-full">
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
+    <html lang="es">
+      <body className="bg-white text-slate-900">
+        <TopBar />
         {children}
       </body>
     </html>
