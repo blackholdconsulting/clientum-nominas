@@ -1,13 +1,14 @@
 // tailwind.config.ts
-import type { Config } from 'tailwindcss'
+import type { Config } from "tailwindcss";
 
-const config: Config = {
+export default {
   content: [
-    './app/**/*.{js,ts,jsx,tsx,mdx}',
-    './components/**/*.{js,ts,jsx,tsx,mdx}',
-    './lib/**/*.{js,ts,jsx,tsx,mdx}',
+    "./app/**/*.{ts,tsx,js,jsx}",
+    "./components/**/*.{ts,tsx,js,jsx}",
+    "./pages/**/*.{ts,tsx,js,jsx}",
   ],
-  theme: { extend: {} },
+  theme: {
+    extend: {},
+  },
   plugins: [],
-}
-export default config
+} satisfies Config;
