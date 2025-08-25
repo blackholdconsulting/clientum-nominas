@@ -1,59 +1,33 @@
-// app/contracts/actions.ts
-'use server'
+"use server";
 
-import { cookies } from 'next/headers'
-import { createServerClient } from '@supabase/ssr'
-import { redirect } from 'next/navigation'
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
 
-function supabaseServer() {
-  const cookieStore = cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cookiesToSet) =>
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
-          ),
-      },
-    },
-  )
-}
+export async function createContract(formData: FormData) {
+  const supabase = getSupabaseServerClient();
 
-export async function createContractFromTemplate(formData: FormData) {
-  const supabase = supabaseServer()
+  const employee_id = String(formData.get("employee_id") || "");
+  const contract_type = String(formData.get("contract_type") || "Indefinido");
+  const start_date_raw = String(formData.get("start_date") || "");
+  const start_date = start_date_raw ? start_date_raw : null; // formato YYYY-MM-DD
 
-  const payload = {
-    template: String(formData.get('template_key') ?? ''),
-    employee_id: String(formData.get('employee_id') ?? ''),
-    data: {
-      position: formData.get('position') || null,
-      salary: formData.get('salary')
-        ? Number(formData.get('salary'))
-        : null,
-      start_date: formData.get('start_date') || null,
-      end_date: formData.get('end_date') || null,
-      notes: formData.get('notes') || null,
-    },
-    status: 'borrador' as const,
+  if (!employee_id) {
+    throw new Error("Selecciona un empleado antes de crear el contrato.");
   }
 
-  if (!payload.template || !payload.employee_id) {
-    throw new Error('Faltan datos obligatorios')
-  }
-
-  const { data, error } = await supabase
-    .from('contracts')
-    .insert(payload)
-    .select('id')
-    .single()
+  const { error } = await supabase.from("contracts").insert({
+    employee_id,
+    contract_type,
+    start_date,        // date (nullable)
+    status: "draft",   // estado inicial
+  });
 
   if (error) {
-    // Deja que Next muestre el error en la página
-    throw new Error(error.message)
+    console.error("createContract error:", error.message);
+    throw new Error(error.message);
   }
 
-  redirect(`/contracts/${data!.id}`)
+  revalidatePath("/contracts");
+  redirect("/contracts"); // si tienes detalle, cámbialo a `/contracts/[id]`
 }
