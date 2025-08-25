@@ -1,236 +1,98 @@
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
+// app/dashboard/page.tsx
+import { cookies, headers } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import Link from "next/link";
 
-import Link from "next/link"
-import { requireUser } from "@/lib/auth"
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Calculator, Users, FileText, BarChart3, LogOut } from "lucide-react"
-
-type Totals = { gross: number; net: number; irpf: number; ss_er: number }
+function getSupabaseServerClient() {
+  const cookieStore = cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get: (name: string) => cookieStore.get(name)?.value,
+        set: () => {}, // no-op en Server Components
+        remove: () => {}, // no-op
+      },
+      global: { headers: { "x-forwarded-host": headers().get("host") ?? "" } },
+    }
+  );
+  return supabase;
+}
 
 export default async function DashboardPage() {
-  // 1) Autenticación (redirecciona si no hay sesión)
-  const { supabase, user } = await requireUser()
-
-  // 2) Lecturas robustas (nunca lanzar error si faltan tablas/vistas)
-  let employeesCount = 0
-  let latestRun:
-    | { id: string; period_year: number; period_month: number; status: string }
-    | null = null
-  let totals: Totals = { gross: 0, net: 0, irpf: 0, ss_er: 0 }
-  let hasSlipsTable = true
-
-  // Empleados
   try {
-    const { count } = await supabase
-      .from("nominas_employees") // vista de compatibilidad
-      .select("*", { head: true, count: "exact" })
-      .eq("user_id", user.id)
-    employeesCount = count ?? 0
-  } catch {}
+    const supabase = getSupabaseServerClient();
 
-  // Último run
-  try {
-    const { data } = await supabase
-      .from("payroll_runs")
-      .select("id, period_year, period_month, status")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
+    // 1) Intentamos leer la vista si existe (no falla si no existe)
+    let employeesCount: number | null = null;
+    let lastRunAt: string | null = null;
+
+    const { data: resume, error: resumeErr } = await supabase
+      .from("v_dashboard_resume")
+      .select("employees_count,last_run_at")
       .limit(1)
-      .maybeSingle()
-    latestRun = data ?? null
-  } catch {
-    latestRun = null
-  }
+      .maybeSingle();
 
-  // Totales del último run (si existe)
-  if (latestRun?.id) {
-    try {
-      const { data: slips } = await supabase
-        .from("payroll_slips")
-        .select("gross, net, irpf, ss_employer")
-        .eq("run_id", latestRun.id)
-
-      if (slips?.length) {
-        totals = slips.reduce<Totals>(
-          (acc, r: any) => ({
-            gross: acc.gross + Number(r.gross ?? 0),
-            net: acc.net + Number(r.net ?? 0),
-            irpf: acc.irpf + Number(r.irpf ?? 0),
-            ss_er: acc.ss_er + Number(r.ss_employer ?? 0),
-          }),
-          { gross: 0, net: 0, irpf: 0, ss_er: 0 },
-        )
-      }
-    } catch {
-      hasSlipsTable = false
+    if (!resumeErr && resume) {
+      employeesCount = resume.employees_count ?? null;
+      lastRunAt = resume.last_run_at ?? null;
     }
-  }
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Calculator className="h-7 w-7 text-primary" />
-              <h1 className="text-2xl font-bold font-serif text-primary">Clientum Nóminas</h1>
-              <Badge variant="secondary">Dashboard</Badge>
-            </div>
+    // 2) Si la vista no existe o no trae datos, calculamos “a la vieja usanza”
+    if (employeesCount === null) {
+      const { count: eCount, error: eErr } = await supabase
+        .from("employees")
+        .select("*", { count: "exact", head: true });
+      if (!eErr) employeesCount = eCount ?? 0;
+      else employeesCount = 0; // fallback
+    }
 
-            {/* Ajusta a tu ruta real de logout si la tienes */}
-            <form action="/auth?next=%2F" method="get">
-              <Button variant="outline" size="sm">
-                <LogOut className="h-4 w-4 mr-2" />
-                Cerrar sesión
-              </Button>
-            </form>
-          </div>
-        </div>
-      </header>
+    if (lastRunAt === null) {
+      const { data: lastRun, error: rErr } = await supabase
+        .from("payroll_runs")
+        .select("run_date")
+        .order("run_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!rErr && lastRun?.run_date) lastRunAt = lastRun.run_date;
+    }
 
-      {/* Main */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold font-serif mb-2">
-            Bienvenido{user.email ? `, ${user.email}` : ""}
+    return (
+      <main style={{ maxWidth: 900, margin: "40px auto", padding: 24 }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 16 }}>
+          Bienvenido
+        </h1>
+
+        <section>
+          <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 8 }}>
+            Resumen de nóminas
           </h2>
-          <p className="text-muted-foreground">
-            Gestiona las nóminas y empleados de tu cuenta PRO en Clientum.
+          <p>Empleados: {employeesCount ?? 0}</p>
+          <p>Última nómina: {lastRunAt ? new Date(lastRunAt).toLocaleString() : "—"}</p>
+
+          <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+            <Link href="/employees">Ver empleados</Link>
+            <Link href="/contracts/models">Plantillas de contrato</Link>
+          </div>
+
+          <p style={{ marginTop: 16, fontSize: 12, color: "#555" }}>
+            Si el problema persiste, revisa los logs del servidor o{" "}
+            <Link href="/api/diag">/api/diag</Link>.
           </p>
-        </div>
-
-        {/* Acciones rápidas */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <QuickCard
-            href="/employees"
-            icon={<Users className="h-8 w-8 text-primary" />}
-            title="Empleados"
-            description="Gestionar empleados activos"
-            badge={String(employeesCount)}
-          />
-          <QuickCard
-            href="/contracts"
-            icon={<FileText className="h-8 w-8 text-primary" />}
-            title="Contratos"
-            description="Contratos pendientes de revisión"
-            badge={"0"}
-          />
-          <QuickCard
-            href="/payroll"
-            icon={<Calculator className="h-8 w-8 text-primary" />}
-            title="Nóminas"
-            description={
-              latestRun
-                ? `Último: ${latestRun.period_month}/${latestRun.period_year} (${latestRun.status})`
-                : "Aún no hay runs"
-            }
-            badge={latestRun ? "Periodo" : "—"}
-          />
-          <QuickCard
-            href="/reports"
-            icon={<BarChart3 className="h-8 w-8 text-primary" />}
-            title="Informes"
-            description="Informes pendientes de generar"
-            badge={"0"}
-          />
-        </div>
-
-        {/* Resumen + Alertas */}
-        <div className="grid lg:grid-cols-3 gap-6 mb-8">
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Resumen financiero</CardTitle>
-              <CardDescription>Costes de nómina del último periodo</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid md:grid-cols-3 gap-4">
-                <Kpi label="Total Bruto" value={`€${totals.gross.toFixed(2)}`} />
-                <Kpi label="Neto a pagar" value={`€${totals.net.toFixed(2)}`} />
-                <Kpi label="IRPF" value={`€${totals.irpf.toFixed(2)}`} />
-              </div>
-              {!hasSlipsTable && (
-                <p className="text-xs text-muted-foreground mt-3">
-                  Nota: aún no existe <code>public.payroll_slips</code>. Los totales
-                  aparecerán cuando crees tus primeras nóminas.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Alertas del sistema</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <AlertPill
-                  color="destructive"
-                  text={employeesCount === 0 ? "Aún no has añadido empleados" : "Sin alertas críticas"}
-                />
-                <AlertPill
-                  color="blue"
-                  text={
-                    latestRun
-                      ? `Último run: ${latestRun.period_month}/${latestRun.period_year} (${latestRun.status})`
-                      : "Crea tu primer run de nómina"
-                  }
-                />
-              </CardContent>
-            </Card>
+        </section>
+      </main>
+    );
+  } catch (err) {
+    // NUNCA rompas el SSR: devuelve una pantalla segura
+    return (
+      <main style={{ maxWidth: 900, margin: "40px auto", padding: 24 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700 }}>Ha ocurrido un error</h1>
+        <p>El dashboard no pudo cargar. Revisa /api/diag para más detalle.</p>
+        <div style={{ marginTop: 12 }}>
+          <Link href="/">Ir al inicio</Link>
         </div>
       </main>
-    </div>
-  )
-}
-
-/* ---------- Auxiliares ---------- */
-
-function QuickCard({
-  href, icon, title, description, badge,
-}: {
-  href: string
-  icon: React.ReactNode
-  title: string
-  description: string
-  badge: string
-}) {
-  return (
-    <Link href={href}>
-      <Card className="hover:shadow-lg transition-shadow">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            {icon}
-            <Badge variant="secondary">{badge}</Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <CardTitle className="text-lg">{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardContent>
-      </Card>
-    </Link>
-  )
-}
-
-function Kpi({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="text-center p-4 bg-muted/50 rounded-lg">
-      <div className="text-2xl font-bold">{value}</div>
-      <p className="text-sm text-muted-foreground">{label}</p>
-    </div>
-  )
-}
-
-function AlertPill({ color, text }: { color: "destructive" | "blue"; text: string }) {
-  const dot = color === "destructive" ? "bg-destructive" : "bg-blue-500"
-  const bg = color === "destructive" ? "bg-destructive/10" : "bg-blue-50"
-  return (
-    <div className={`flex items-center space-x-2 p-2 rounded ${bg}`}>
-      <div className={`w-2 h-2 rounded-full ${dot}`} />
-      <span className="text-sm">{text}</span>
-    </div>
-  )
+    );
+  }
 }
