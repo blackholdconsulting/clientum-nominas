@@ -1,97 +1,133 @@
+// app/payroll/actions.ts
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/utils/supabase/server";
 
-/** Genera (o abre) la nómina del periodo. Devuelve payroll_id. */
+/**
+ * Crea (o abre) la nómina de un periodo (año/mes) para el usuario actual.
+ * - Si ya existe, devuelve su id.
+ * - Si no existe, la crea en BORRADOR.
+ * - Intenta clonar los items del periodo anterior; si no hay, crea items vacíos para
+ *   todos los empleados del usuario.
+ * - Recalcula totales (RPC) y devuelve el id.
+ */
 export async function generatePayroll(year: number, month: number) {
   const s = createSupabaseServer();
-  const { data, error } = await s.rpc("payroll_generate_period", {
-    p_year: year,
-    p_month: month,
-  });
-  if (error) throw error;
-  revalidatePath(`/payroll`);
-  return data as string;
-}
 
-/** Guarda una línea (formData con campos numéricos) */
-export async function saveItem(formData: FormData) {
-  const id = String(formData.get("id") ?? "");
-  const patch = {
-    base_gross: Number(formData.get("base_gross") ?? 0),
-    irpf_amount: Number(formData.get("irpf_amount") ?? 0),
-    ss_emp_amount: Number(formData.get("ss_emp_amount") ?? 0),
-    ss_er_amount: Number(formData.get("ss_er_amount") ?? 0),
-    net: Number(formData.get("net") ?? 0),
-  };
-  const s = createSupabaseServer();
-  const { error } = await s.from("payroll_items").update(patch).eq("id", id);
-  if (error) throw error;
+  const { data: auth, error: authErr } = await s.auth.getUser();
+  if (authErr || !auth?.user) {
+    throw new Error("No autenticado");
+  }
+  const userId = auth.user.id;
 
-  // intenta leer el payroll_id para revalidar/redirect si hace falta
-  const { data: item } = await s
-    .from("payroll_items")
-    .select("payroll_id")
-    .eq("id", id)
+  // 1) ¿Ya existe la nómina del periodo?
+  const { data: existing, error: exErr } = await s
+    .from("payrolls")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("period_year", year)
+    .eq("period_month", month)
     .maybeSingle();
 
-  if (item?.payroll_id) {
-    const { data: hdr } = await s
-      .from("payrolls")
-      .select("period_year,period_month")
-      .eq("id", item.payroll_id)
-      .maybeSingle();
-    if (hdr) revalidatePath(`/payroll/period/${hdr.period_year}/${hdr.period_month}`);
-  }
-  return { ok: true };
-}
+  if (exErr) throw new Error(exErr.message);
+  if (existing?.id) return existing.id as string;
 
-/** Finaliza la nómina (sella) y revalida */
-export async function finalizePayroll(payrollId: string) {
-  const s = createSupabaseServer();
-  const { error } = await s.rpc("payroll_finalize", { p_payroll: payrollId });
-  if (error) throw error;
-
-  const { data: hdr } = await s
+  // 2) Insertar cabecera en borrador
+  const { data: inserted, error: insErr } = await s
     .from("payrolls")
-    .select("period_year,period_month")
-    .eq("id", payrollId)
+    .insert({
+      user_id: userId,
+      period_year: year,
+      period_month: month,
+      status: "draft",
+      gross_total: 0,
+      net_total: 0,
+    })
+    .select("id")
     .single();
-  revalidatePath(`/payroll/period/${hdr.period_year}/${hdr.period_month}`);
-  return { ok: true };
-}
 
-/** Compat: algunas páginas importan upsertPayroll desde ../../actions */
-export async function upsertPayroll(formData: FormData) {
-  const id = String(formData.get("id") ?? "");
-  const period_year = Number(formData.get("period_year") ?? 0);
-  const period_month = Number(formData.get("period_month") ?? 0);
-  const status = String(formData.get("status") ?? "draft");
+  if (insErr) throw new Error(insErr.message);
+  const payrollId = inserted.id as string;
 
-  const s = createSupabaseServer();
-  if (id) {
-    const { error } = await s
-      .from("payrolls")
-      .update({ period_year, period_month, status })
-      .eq("id", id);
-    if (error) throw error;
+  // 3) Intentar clonar items del periodo anterior; si no hay, crear vacíos
+  const prev =
+    month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
+
+  // 3a) Buscar cabecera anterior
+  const { data: prevHeader } = await s
+    .from("payrolls")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("period_year", prev.y)
+    .eq("period_month", prev.m)
+    .maybeSingle();
+
+  let itemsToInsert:
+    | {
+        payroll_id: string;
+        user_id: string;
+        employee_id: string;
+        base_gross: number;
+        irpf_amount: number;
+        ss_emp_amount: number;
+        ss_er_amount: number;
+        net: number;
+      }[] = [];
+
+  if (prevHeader?.id) {
+    // 3b) Clonar del periodo anterior
+    const { data: prevItems } = await s
+      .from("payroll_items")
+      .select(
+        "employee_id, base_gross, irpf_amount, ss_emp_amount, ss_er_amount, net"
+      )
+      .eq("payroll_id", prevHeader.id);
+
+    itemsToInsert =
+      prevItems?.map((i) => ({
+        payroll_id: payrollId,
+        user_id: userId,
+        employee_id: i.employee_id as string,
+        base_gross: Number(i.base_gross ?? 0),
+        irpf_amount: Number(i.irpf_amount ?? 0),
+        ss_emp_amount: Number(i.ss_emp_amount ?? 0),
+        ss_er_amount: Number(i.ss_er_amount ?? 0),
+        net: Number(i.net ?? 0),
+      })) ?? [];
   } else {
-    const { error } = await s
-      .from("payrolls")
-      .insert({ period_year, period_month, status });
-    if (error) throw error;
-  }
-  revalidatePath("/payroll");
-  redirect("/payroll");
-}
+    // 3c) Crear items vacíos para todos los empleados del usuario
+    const { data: emps } = await s
+      .from("employees")
+      .select("id")
+      .eq("user_id", userId);
 
-/** Shim: hay vistas que siguen llamando a "createOrOpenPayrollAction" desde /payroll/new */
-export async function createOrOpenPayrollAction(formData: FormData) {
-  const year = Number(formData.get("year"));
-  const month = Number(formData.get("month"));
-  const id = await generatePayroll(year, month);
-  if (!id) throw new Error("No se pudo generar la nómina");
-  redirect(`/payroll/period/${year}/${month}`);
+    itemsToInsert =
+      emps?.map((e) => ({
+        payroll_id: payrollId,
+        user_id: userId,
+        employee_id: e.id as string,
+        base_gross: 0,
+        irpf_amount: 0,
+        ss_emp_amount: 0,
+        ss_er_amount: 0,
+        net: 0,
+      })) ?? [];
+  }
+
+  if (itemsToInsert.length) {
+    const { error: itemsErr } = await s
+      .from("payroll_items")
+      .insert(itemsToInsert);
+    if (itemsErr) throw new Error(itemsErr.message);
+  }
+
+  // 4) Recalcular totales (si existe el RPC; si no, no bloquea)
+  //   - Asegúrate de que el RPC se llame recalc_payroll_totals(payroll uuid)
+  await s.rpc("recalc_payroll_totals", { payroll: payrollId }).catch(() => {});
+
+  // 5) Revalidate listado
+  revalidatePath("/payroll");
+
+  return payrollId;
 }
