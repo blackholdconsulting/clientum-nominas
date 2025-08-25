@@ -1,311 +1,262 @@
 // app/dashboard/page.tsx
-import Link from "next/link";
-import { format } from "date-fns";
-import es from "date-fns/locale/es";
 import { cookies, headers } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import {
+  Users,
+  ReceiptText,
+  Rocket,
+  ChevronRight,
+  ListTree,
+  FileText,
+  Activity,
+  ExternalLink,
+} from "lucide-react";
+import Link from "next/link";
 
-// Si en tu proyecto tienes este helper, úsalo.
-// Debe ser una Server Action/función async compatible.
-// import { getSupabaseServerClient } from "@/lib/supabase/server";
+type LastPayroll = { id: string; run_date: string | null };
+type AuditItem = { id: string; message: string; created_at: string };
 
-// Fallback: evita romper si el helper aún no está disponible.
-async function getSupabaseSafe() {
-  try {
-    const { createServerClient } = await import("@supabase/ssr");
-    const cookieStore = cookies();
+async function getDashboard() {
+  const cookieStore = await cookies();
 
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get: (name) => cookieStore.get(name)?.value,
-          set: () => {},
-          remove: () => {},
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name) {
+          return cookieStore.get(name)?.value;
         },
-        global: {
-          headers: {
-            "x-forwarded-host": headers().get("host") ?? "",
-          },
+      },
+      global: {
+        headers: {
+          "x-forwarded-host": (await headers()).get("host") ?? "",
         },
-      }
-    );
-    return supabase;
-  } catch {
-    return null as any;
-  }
-}
+      },
+    }
+  );
 
-type DashboardData = {
-  userEmail: string | null;
-  employeesCount: number;
-  lastRunLabel: string | null;
-  lastRunDate: string | null;
-  quickLog: Array<{ id: string; title: string; when: string }>;
-};
+  // 🔧 Ajusta nombres de tablas/campos a tu esquema real
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { employeesCount: 0, lastPayroll: null, recent: [] as AuditItem[] };
 
-async function loadDashboard(): Promise<DashboardData> {
-  // const supabase = await getSupabaseServerClient();
-  const supabase = await getSupabaseSafe();
-
-  let userEmail: string | null = null;
-  let employeesCount = 0;
-  let lastRunLabel: string | null = null;
-  let lastRunDate: string | null = null;
-  const quickLog: DashboardData["quickLog"] = [];
-
-  if (!supabase) {
-    // Modo “offline”: render bonito pero sin datos
-    return { userEmail, employeesCount, lastRunLabel, lastRunDate, quickLog };
-  }
-
-  // Usuario
-  try {
-    const { data } = await supabase.auth.getUser();
-    userEmail = data.user?.email ?? null;
-  } catch {
-    userEmail = null;
-  }
-
-  // Empleados (usa tu vista/tabla real)
-  try {
-    // Ajusta a tu fuente real: e.g. from("nominas_employees") o v_employees
-    const { count } = await supabase
-      .from("nominas_employees")
-      .select("*", { head: true, count: "exact" });
-    employeesCount = count ?? 0;
-  } catch {
-    employeesCount = 0;
-  }
-
-  // Última nómina (ajusta a tu tabla/vista de runs)
-  try {
-    // Ejemplo: "payroll_runs": { label, created_at }
-    const { data } = await supabase
+  const [{ count: employeesCount }, { data: lastPayroll }, { data: recent }] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("active", true),
+    supabase
       .from("payroll_runs")
-      .select("label, created_at")
-      .order("created_at", { ascending: false })
+      .select("id, run_date")
+      .eq("user_id", user.id)
+      .order("run_date", { ascending: false })
       .limit(1)
-      .maybeSingle();
-
-    if (data) {
-      lastRunLabel = data.label ?? "—";
-      lastRunDate = data.created_at
-        ? format(new Date(data.created_at), "d MMM yyyy, HH:mm", { locale: es })
-        : null;
-    }
-  } catch {
-    lastRunLabel = null;
-    lastRunDate = null;
-  }
-
-  // Log de acciones recientes (opcional). Ajústalo a tu “audit log” si tienes.
-  try {
-    const { data } = await supabase
-      .from("payroll_slips")
-      .select("id, created_at")
+      .maybeSingle<LastPayroll>(),
+    supabase
+      .from("audit_log") // si no tienes tabla de auditoría, devuelvo vacío
+      .select("id, message, created_at")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(6)
+      .returns<AuditItem[]>(),
+  ]);
 
-    if (Array.isArray(data)) {
-      for (const row of data) {
-        quickLog.push({
-          id: row.id,
-          title: "Generación de recibo de nómina",
-          when: row.created_at
-            ? format(new Date(row.created_at), "d MMM yyyy, HH:mm", {
-                locale: es,
-              })
-            : "—",
-        });
-      }
-    }
-  } catch {
-    // vacío
-  }
-
-  return { userEmail, employeesCount, lastRunLabel, lastRunDate, quickLog };
+  return {
+    employeesCount: employeesCount ?? 0,
+    lastPayroll: lastPayroll ?? null,
+    recent: recent ?? [],
+  };
 }
 
-function Card({
-  children,
-  className = "",
+export default async function DashboardPage() {
+  const { employeesCount, lastPayroll, recent } = await getDashboard();
+
+  return (
+    <main className="min-h-[calc(100dvh-64px)]">
+      {/* Header */}
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0 -z-10 bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 opacity-10" />
+        <div className="mx-auto max-w-7xl px-4 pt-8 pb-6 sm:px-6 lg:px-8">
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Bienvenido,
+            <span className="ml-2 bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-fuchsia-600">
+              {/** Puedes traer el email con supabase si quieres */}
+            </span>
+          </h1>
+          <p className="mt-2 text-slate-600 dark:text-slate-300">
+            Resumen de nóminas y accesos rápidos.
+          </p>
+        </div>
+      </section>
+
+      {/* KPIs */}
+      <section className="mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
+        <div className="grid gap-6 md:grid-cols-3">
+          <KpiCard
+            title="Empleados"
+            value={employeesCount.toString()}
+            helper="Total activos"
+            icon={<Users className="size-5 text-indigo-600" />}
+          />
+
+          <KpiCard
+            title="Última nómina"
+            value={lastPayroll?.run_date ? new Date(lastPayroll.run_date).toLocaleDateString() : "—"}
+            helper={lastPayroll ? "Fecha de la última ejecución" : "sin registros"}
+            icon={<ReceiptText className="size-5 text-violet-600" />}
+          />
+
+          <div className="group relative rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur p-5 shadow-sm hover:shadow-md transition-all">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400">Accesos rápidos</h3>
+                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                  Gestión de empleados y plantillas
+                </p>
+              </div>
+              <Rocket className="size-6 text-fuchsia-600" />
+            </div>
+            <div className="mt-4 flex gap-3">
+              <Link
+                href="/employees"
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-3 py-2 text-sm font-medium hover:opacity-90 transition"
+              >
+                Empleados <ChevronRight className="size-4" />
+              </Link>
+              <Link
+                href="/contracts/models"
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 text-white px-3 py-2 text-sm font-medium hover:bg-indigo-700 transition"
+              >
+                Plantillas <ChevronRight className="size-4" />
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="mt-8 grid gap-6 lg:grid-cols-3">
+          {/* Últimas acciones */}
+          <div className="lg:col-span-2 rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Últimas acciones
+              </h3>
+              <Link
+                href="/payroll"
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1"
+              >
+                Ver nóminas <ExternalLink className="size-3.5" />
+              </Link>
+            </div>
+
+            {recent.length === 0 ? (
+              <EmptyState
+                icon={<Activity className="size-5 text-slate-400" />}
+                title="No hay registros recientes."
+                caption="Se mostrarán aquí las acciones más relevantes de tu cuenta."
+              />
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {recent.map((r) => (
+                  <li key={r.id} className="relative pl-6">
+                    <span className="absolute left-0 top-1.5 size-2 rounded-full bg-indigo-500" />
+                    <div className="flex items-baseline justify-between">
+                      <p className="text-sm text-slate-700 dark:text-slate-200">{r.message}</p>
+                      <time className="ml-2 shrink-0 text-xs text-slate-500">
+                        {new Date(r.created_at).toLocaleString()}
+                      </time>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* CTA Plantillas */}
+          <div className="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur p-5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-indigo-50 dark:bg-indigo-900/30 p-2">
+                <FileText className="size-5 text-indigo-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Plantillas de contrato
+                </h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  Crea o edita tus modelos de contrato y úsalo en minutos.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <Link
+                href="/contracts/models"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+              >
+                <ListTree className="size-4" /> Ir a plantillas
+              </Link>
+              <Link
+                href="/api/diag"
+                className="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 underline underline-offset-2"
+              >
+                /api/diag
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+/* ------------------------------ UI bits ------------------------------ */
+
+function KpiCard({
+  title,
+  value,
+  helper,
+  icon,
 }: {
-  children: React.ReactNode;
-  className?: string;
+  title: string;
+  value: string;
+  helper?: string;
+  icon?: React.ReactNode;
 }) {
   return (
-    <div
-      className={`rounded-xl border bg-white p-5 shadow-sm ${className}`}
-      style={{ borderColor: "rgb(226 232 240)" /* slate-200 */ }}
-    >
-      {children}
+    <div className="group relative rounded-xl border border-slate-200/70 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur p-5 shadow-sm hover:shadow-md transition-all">
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</h3>
+          <div className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            {value}
+          </div>
+          {helper && (
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{helper}</p>
+          )}
+        </div>
+        {icon}
+      </div>
     </div>
   );
 }
 
-function Stat({
-  label,
-  value,
-  foot,
+function EmptyState({
+  icon,
+  title,
+  caption,
 }: {
-  label: string;
-  value: string | number;
-  foot?: string | null;
+  icon?: React.ReactNode;
+  title: string;
+  caption?: string;
 }) {
   return (
-    <Card>
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-2 text-3xl font-semibold text-slate-900">{value}</div>
-      {foot ? <div className="mt-1 text-sm text-slate-500">{foot}</div> : null}
-    </Card>
-  );
-}
-
-export default async function DashboardPage() {
-  const {
-    userEmail,
-    employeesCount,
-    lastRunLabel,
-    lastRunDate,
-    quickLog,
-  } = await loadDashboard();
-
-  return (
-    <main className="space-y-8">
-      {/* Header */}
-      <header className="flex flex-col gap-1">
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-          Bienvenido{userEmail ? `, ${userEmail}` : ""}
-        </h1>
-        <p className="text-slate-600">Resumen de nóminas</p>
-      </header>
-
-      {/* KPIs */}
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Stat label="Empleados" value={employeesCount} foot="Total activos" />
-        <Stat
-          label="Última nómina"
-          value={lastRunLabel ?? "—"}
-          foot={lastRunDate ?? "sin registros"}
-        />
-        <Card className="flex items-center justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Accesos rápidos
-            </div>
-            <div className="mt-2 text-sm text-slate-600">
-              Gestión de empleados y plantillas
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Link
-              href="/employees"
-              className="rounded-lg border px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Empleados
-            </Link>
-            <Link
-              href="/contracts/models"
-              className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-            >
-              Plantillas
-            </Link>
-          </div>
-        </Card>
-      </section>
-
-      {/* Panel inferior: Acciones recientes + Ayuda */}
-      <section className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-900">
-              Últimas acciones
-            </h2>
-            <Link
-              href="/payroll"
-              className="text-sm font-medium text-indigo-600 hover:underline"
-            >
-              Ver nóminas
-            </Link>
-          </div>
-
-          <ul className="divide-y">
-            {quickLog.length > 0 ? (
-              quickLog.map((item) => (
-                <li key={item.id} className="flex items-center justify-between py-3">
-                  <div className="flex items-center gap-3">
-                    {/* icono inline */}
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      className="h-5 w-5 text-indigo-600"
-                    >
-                      <path
-                        d="M5 12h14M12 5v14"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <div>
-                      <div className="text-sm font-medium text-slate-900">
-                        {item.title}
-                      </div>
-                      <div className="text-xs text-slate-500">{item.when}</div>
-                    </div>
-                  </div>
-                  <Link
-                    className="text-sm text-indigo-600 hover:underline"
-                    href={`/payroll/slips/${item.id}`}
-                  >
-                    Ver
-                  </Link>
-                </li>
-              ))
-            ) : (
-              <li className="py-6 text-sm text-slate-500">
-                No hay registros recientes.
-              </li>
-            )}
-          </ul>
-        </Card>
-
-        <Card>
-          <h2 className="mb-2 text-base font-semibold text-slate-900">
-            ¿Problemas?
-          </h2>
-          <p className="text-sm text-slate-600">
-            Si no ves datos, crea una nómina o revisa permisos. Para ver logs del
-            servidor:
-          </p>
-          <div className="mt-3">
-            <Link
-              href="/api/diag"
-              className="text-sm font-medium text-indigo-600 hover:underline"
-            >
-              /api/diag
-            </Link>
-          </div>
-          <div className="mt-4">
-            <Link
-              href="/contracts/models"
-              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              {/* icono */}
-              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
-                <path
-                  d="M6 8h12M6 12h12M6 16h12"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
-              Ir a plantillas
-            </Link>
-          </div>
-        </Card>
-      </section>
-    </main>
+    <div className="mt-6 flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 dark:border-slate-700 py-10">
+      <div className="rounded-full bg-slate-100 dark:bg-slate-800 p-2">{icon}</div>
+      <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">{title}</p>
+      {caption && (
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{caption}</p>
+      )}
+    </div>
   );
 }
