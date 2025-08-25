@@ -1,26 +1,30 @@
 "use client";
 
-import { useTransition } from "react";
 import { deleteEmployee } from "@/app/employees/actions";
+import { useTransition } from "react";
 
 export default function DeleteEmployeeButton({ id }: { id: string }) {
-  const [pending, start] = useTransition();
+  const [isPending, startTransition] = useTransition();
 
-  function onClick() {
-    if (!confirm("¿Eliminar este empleado? Esta acción no se puede deshacer.")) return;
-    const fd = new FormData();
-    fd.append("employee_id", id);
-    start(() => deleteEmployee(fd));
-  }
+  // Ligamos la server action con el id en el servidor
+  const action = deleteEmployee.bind(null, id);
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={pending}
-      className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+    <form
+      action={action}
+      onSubmit={(e) => {
+        // confirmación básica en cliente
+        const ok = confirm("¿Seguro que quieres eliminar este empleado?");
+        if (!ok) e.preventDefault();
+      }}
     >
-      Eliminar
-    </button>
+      <button
+        type="submit"
+        disabled={isPending}
+        className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-60"
+      >
+        {isPending ? "Eliminando…" : "Eliminar"}
+      </button>
+    </form>
   );
 }
