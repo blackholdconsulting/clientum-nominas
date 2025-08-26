@@ -1,171 +1,101 @@
-// app/payroll/editor/page.tsx
-import { cookies } from "next/headers";
-import Link from "next/link";
-import { createServerClient } from "@supabase/ssr";
+'use client';
 
-function monthNameEs(m: number) {
-  const arr = [
-    "enero","febrero","marzo","abril","mayo","junio",
-    "julio","agosto","septiembre","octubre","noviembre","diciembre",
-  ];
-  return arr[m - 1];
+import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+
+function fmtPeriodo(year: number, month: number) {
+  const fmt = new Intl.DateTimeFormat('es-ES', { month: 'long' });
+  const mesNombre = fmt.format(new Date(year, month - 1, 1));
+  return `${mesNombre.charAt(0).toUpperCase()}${mesNombre.slice(1)} ${year}`;
 }
 
-export default async function PayrollEditor({
-  searchParams,
-}: {
-  searchParams: { year?: string; month?: string };
-}) {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: () => cookieStore }
-  );
+export default function PayrollEditorPage() {
+  const sp = useSearchParams();
+  const router = useRouter();
 
-  // Parámetros
-  const now = new Date();
-  const year = Number(searchParams?.year ?? now.getFullYear());
-  const month = Math.max(1, Math.min(12, Number(searchParams?.month ?? (now.getMonth() + 1))));
+  const year = Number(sp.get('year') || new Date().getFullYear());
+  const month = Number(sp.get('month') || new Date().getMonth() + 1);
 
-  // 1) Averiguamos el org_id del usuario actual
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, org_id")
-    .single();
-
-  let orgId: string | null = profile?.org_id ?? null;
-
-  if (!orgId && profile?.id) {
-    // Fallback a org_members (por si manejas multi-org)
-    const { data: member } = await supabase
-      .from("org_members")
-      .select("org_id")
-      .eq("user_id", profile.id)
-      .limit(1)
-      .maybeSingle();
-    orgId = member?.org_id ?? null;
+  if (!Number.isFinite(year) || !Number.isFinite(month)) {
+    return (
+      <main className="mx-auto max-w-3xl px-6 py-16">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-amber-800">
+          <h2 className="text-lg font-semibold">Parámetros inválidos</h2>
+          <p className="mt-2 text-sm">
+            Faltan <code>year</code> o <code>month</code> en la URL.
+          </p>
+          <button
+            className="mt-4 rounded-md bg-amber-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+            onClick={() => router.push('/payroll')}
+          >
+            Volver a la lista
+          </button>
+        </div>
+      </main>
+    );
   }
 
-  // 2) Empleados del cliente (primero mira vista segura, luego tabla)
-  let employees: Array<{
-    id?: string;
-    uuid?: string;
-    full_name?: string | null;
-    nif?: string | null;
-    category?: string | null;
-  }> = [];
-
-  // a) Si tienes la vista v_my_employees (recomendada)
-  const { data: vEmp, error: vErr } = await supabase
-    .from("v_my_employees")
-    .select("id, uuid, full_name, nif, category");
-
-  if (!vErr && vEmp) {
-    employees = vEmp;
-  } else {
-    // b) Fallback a employees con filtro por org (requiere RLS o políticas)
-    if (!orgId) {
-      // Si no hay orgId, no mostramos empleados
-      employees = [];
-    } else {
-      const { data: emp2 } = await supabase
-        .from("employees")
-        .select("id, uuid, full_name, nif, category, org_id")
-        .eq("org_id", orgId);
-      employees = emp2 ?? [];
-    }
-  }
+  const periodoLabel = fmtPeriodo(year, month);
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-10">
-      {/* Encabezado */}
+    <main className="mx-auto max-w-6xl px-6 py-10">
       <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Editor de nómina {String(month).padStart(2, "0")}/{year}
-          </h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Aquí podrás preparar las nóminas de todos los empleados de tu
-            empresa para el periodo seleccionado.
-          </p>
-        </div>
-
+        <h1 className="text-2xl font-semibold text-slate-900">
+          Editor de nómina {String(month).padStart(2,'0')}/{year}
+        </h1>
         <Link
           href="/payroll"
-          className="rounded-lg border bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+          className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
           Volver a la lista
         </Link>
       </div>
 
-      {/* Aviso */}
-      <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        El editor ya está operativo. Conecta aquí tu carga de empleados y líneas
-        de nómina. Para empezar, crea o reutiliza un borrador del periodo{" "}
-        <strong>
-          {monthNameEs(month)} {year}
-        </strong>{" "}
-        y añade las partidas por empleado.
+      <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
+        <span className="font-medium">Período: </span>{periodoLabel} &nbsp;—&nbsp;
+        <span className="font-medium">Mes: </span>{month} &nbsp;—&nbsp;
+        <span className="font-medium">Año: </span>{year}
       </div>
 
-      {/* Grid de empleados */}
-      {employees.length === 0 ? (
-        <div className="rounded-lg border bg-white p-6 text-gray-600">
-          No se han encontrado empleados para tu organización.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          {employees.map((e, idx) => (
-            <div key={e.uuid ?? e.id ?? idx} className="rounded-xl border bg-white p-5 shadow-sm">
-              <div className="mb-1 text-sm text-gray-500">
-                Empleado
-              </div>
-              <div className="mb-2 text-lg font-semibold">
-                {e.full_name ?? `Empleado ${idx + 1}`}
-              </div>
+      {/* 
+        Aquí puedes montar tu editor real (lista de empleados, conceptos, etc)
+        leyendo year/month. Este es un “shell” seguro lado cliente.
+      */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <article className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="p-5">
+            <h3 className="text-lg font-medium text-slate-900">Empleado A (ejemplo)</h3>
+            <p className="mt-1 text-sm text-slate-600">NIF: 00000000A — Categoría: Administrativo</p>
 
-              <div className="text-sm text-gray-600">
-                <div>
-                  <span className="font-medium">NIF: </span>{e.nif ?? "—"}
-                </div>
-                <div>
-                  <span className="font-medium">Categoría: </span>{e.category ?? "—"}
-                </div>
-              </div>
-
-              {/* Aquí podrías listar/editar conceptos de payroll_items del periodo */}
-              <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">Conceptos (ejemplo)</div>
-                  <div className="text-xs text-gray-500">
-                    {monthNameEs(month)} {year}
-                  </div>
-                </div>
-                <ul className="mt-2 list-disc pl-5">
-                  <li>Salario base — … €</li>
-                  <li>Plus transporte — … €</li>
-                </ul>
-              </div>
-
-              <div className="mt-4 flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  className="inline-flex items-center rounded-lg border bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-                >
-                  Ver detalle
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
-                >
-                  Guardar
-                </button>
-              </div>
+            <div className="mt-4 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
+              <div>Concepto: Salario Base — 1.200,00 €</div>
+              <div>Concepto: Prorrata Pagas — 200,00 €</div>
+              <div className="opacity-60">…</div>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+
+            <button className="mt-4 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              Guardar
+            </button>
+          </div>
+        </article>
+
+        <article className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="p-5">
+            <h3 className="text-lg font-medium text-slate-900">Empleado B (ejemplo)</h3>
+            <p className="mt-1 text-sm text-slate-600">NIF: 00000000B — Categoría: Comercial</p>
+
+            <div className="mt-4 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
+              <div>Concepto: Salario Base — 1.350,00 €</div>
+              <div>Concepto: Plus Transporte — 90,00 €</div>
+              <div className="opacity-60">…</div>
+            </div>
+
+            <button className="mt-4 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              Guardar
+            </button>
+          </div>
+        </article>
+      </div>
+    </main>
   );
 }
