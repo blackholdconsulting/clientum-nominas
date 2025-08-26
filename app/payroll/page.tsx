@@ -1,70 +1,67 @@
-'use client';
+// app/payroll/page.tsx
+import Link from "next/link";
 
-import Link from 'next/link';
-
-const MESES = [
-  'Enero','Febrero','Marzo','Abril','Mayo','Junio',
-  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
+const MONTHS = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
 ];
 
 export default function PayrollHome() {
-  const now = new Date();
-  const year = now.getFullYear();
+  const year = new Date().getFullYear();
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <header className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Gestión de Nóminas
-          </h1>
-          <p className="mt-1 text-slate-600">
-            Selecciona un período para preparar las nóminas de tus empleados.
-          </p>
-        </div>
-        <div className="rounded-lg bg-slate-50 px-4 py-2 text-slate-700">
-          Año <span className="font-semibold">{year}</span>
-        </div>
-      </header>
+    <main className="mx-auto max-w-6xl px-6 py-8">
+      <h1 className="text-2xl font-semibold mb-6">Gestión de Nóminas</h1>
+      <p className="text-muted-foreground mb-8">
+        Selecciona un período para preparar las nóminas de tus empleados.
+      </p>
 
-      <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {MESES.map((mes, i) => {
-          const month = i + 1;
-          // 👉 forzamos /payroll/editor/page
+      <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        {MONTHS.map((label, idx) => {
+          const month = idx + 1;
           const href = `/payroll/editor/page?year=${year}&month=${month}`;
+
           return (
-            <article
-              key={mes}
-              className="rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md"
+            <section
+              key={month}
+              className="rounded-xl border bg-white p-5 shadow-sm"
             >
-              <div className="p-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-medium text-slate-900">{mes}</h3>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                    {String(month).padStart(2, '0')}/{year}
-                  </span>
-                </div>
+              <header className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-medium">{label}</h3>
+                <span className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-600">
+                  {String(month).padStart(2, "0")}/{year}
+                </span>
+              </header>
 
-                <p className="mt-2 text-sm text-slate-600">
-                  Prepara, revisa y guarda las nóminas de tu equipo para este mes.
-                </p>
+              <p className="text-sm text-gray-600 mb-4">
+                Prepara, revisa y guarda las nóminas de tu equipo para este mes.
+              </p>
 
-                <div className="mt-5 flex gap-3">
-                  <Link
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    prefetch={false}
-                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-                  >
-                    Editar nómina
-                  </Link>
-                </div>
+              <div className="pt-2">
+                <Link
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  prefetch={false}
+                  className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+                >
+                  Editar nómina
+                </Link>
               </div>
-            </article>
+            </section>
           );
         })}
-      </section>
+      </div>
     </main>
   );
 }
