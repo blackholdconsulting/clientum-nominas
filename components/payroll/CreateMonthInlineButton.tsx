@@ -15,14 +15,15 @@ export default function CreateMonthInlineButton({ year, month }: { year: number;
       const res = await fetch("/api/payroll/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
         body: JSON.stringify({ year, month }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
         setMsg(json.error ?? "Error");
       } else {
-        // Abrir directamente el editor en el panel
-        router.push(`/payroll?year=${year}&month=${month}`);
+        router.push(`/payroll?year=${year}&month=${month}`); // abre panel
         router.refresh();
       }
     } catch (e: any) {
@@ -36,7 +37,7 @@ export default function CreateMonthInlineButton({ year, month }: { year: number;
     <button
       onClick={submit}
       disabled={busy}
-      className="rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-medium text-blue-700 shadow-sm hover:bg-blue-50 disabled:opacity-60"
+      className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:opacity-60"
       title="Crear nómina del mes"
     >
       {busy ? "Creando…" : "Crear nómina"}
