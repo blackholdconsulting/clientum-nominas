@@ -3,12 +3,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { createPagesBrowserClient } from '@supabase/auth-helpers-nextjs';
+import { createBrowserClient } from '@supabase/ssr';          // ← CAMBIO
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 type ID = string | number;
 
-// === Tipos locales (adapta campos si tu esquema difiere) ===
 interface Payroll {
   id: ID;
   period_year: number;
@@ -18,7 +17,7 @@ interface Payroll {
 
 interface Employee {
   id: ID;
-  full_name?: string; // cambia a name/nombre si tu tabla lo usa
+  full_name?: string;
   name?: string;
   nombre?: string;
 }
@@ -35,12 +34,18 @@ interface Item {
   pdf_url?: string | null;
 }
 
-function empName(e: Employee) {
+function empName(e: Employee | undefined) {
+  if (!e) return '—';
   return e.full_name || e.name || e.nombre || '—';
 }
 
 export default function PayrollEditorPage({ params }: { params: { id: string } }) {
-  const supabase = createPagesBrowserClient();
+  // Cliente Supabase para navegador (sin helpers)
+  const supabase = useMemo(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    return createBrowserClient(url, anon);
+  }, []);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -51,13 +56,12 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [items, setItems] = useState<Item[]>([]);
 
-  // ===== Carga inicial =====
   useEffect(() => {
     (async () => {
       setLoading(true);
       setFlash(null);
 
-      // Cabecera de nómina
+      // Cabecera
       const { data: pr } = await supabase
         .from('payrolls')
         .select('id, period_year, period_month, status')
@@ -73,17 +77,17 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
       const list = (emps || []) as Employee[];
       setEmployees(list);
 
-      // Items existentes del periodo
+      // Items existentes
       const { data: its } = await supabase
         .from('payroll_items')
         .select('id, payroll_id, employee_id, base_gross, irpf_amount, ss_emp_amount, ss_er_amount, net, pdf_url')
         .eq('payroll_id', params.id);
 
-      // Sembrar filas por cada empleado (si no hay item previo)
-      const byEmp = new Map<ID, Item>();
-      (its || []).forEach((it: any) => byEmp.set(it.employee_id, it as Item));
+      const map = new Map<ID, Item>();
+      (its || []).forEach((it: any) => map.set(it.employee_id, it as Item));
+
       const merged: Item[] = list.map(e => {
-        const found = byEmp.get(e.id);
+        const found = map.get(e.id);
         return (
           found || {
             payroll_id: params.id,
@@ -97,16 +101,16 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
           }
         );
       });
-      // orden alfabético por empleado
-      merged.sort((a, b) => empName(list.find(e => e.id === a.employee_id)!).localeCompare(empName(list.find(e => e.id === b.employee_id)!)));
-      setItems(merged);
 
+      // Orden por nombre
+      merged.sort((a, b) => empName(list.find(e => e.id === a.employee_id)!)
+        .localeCompare(empName(list.find(e => e.id === b.employee_id)!)));
+
+      setItems(merged);
       setLoading(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id]);
+  }, [params.id, supabase]);
 
-  // ===== Cálculo de neto por fila =====
   const recalcRow = (row: Item): Item => {
     const net = Number(row.base_gross) - Number(row.irpf_amount) - Number(row.ss_emp_amount);
     return { ...row, net: +net.toFixed(2) };
@@ -115,13 +119,12 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
   const onChange = (idx: number, field: keyof Item, value: number) => {
     setItems(old => {
       const copy = [...old];
-      // @ts-expect-error - reasignación tipada
+      // @ts-ignore
       copy[idx] = recalcRow({ ...copy[idx], [field]: isFinite(+value) ? +value : 0 });
       return copy;
     });
   };
 
-  // ===== Totales de la nómina =====
   const totals = useMemo(() => {
     const t = items.reduce(
       (s, r) => {
@@ -134,11 +137,10 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
       },
       { gross: 0, irpf: 0, sse: 0, sser: 0, net: 0 }
     );
-    Object.keys(t).forEach(k => ((t as any)[k] = +(t as any)[k].toFixed(2)));
+    (Object.keys(t) as (keyof typeof t)[]).forEach(k => (t[k] = +t[k].toFixed(2)));
     return t;
   }, [items]);
 
-  // ===== Guardado (upsert en bloque) =====
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -159,7 +161,6 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
       const { data, error } = await supabase.from('payroll_items').upsert(payload).select();
       if (error) throw error;
 
-      // refrescamos ids recién creados
       const withIds = (data as any[]) || [];
       const byEmp = new Map<ID, Item>();
       withIds.forEach((it: any) => byEmp.set(it.employee_id, it as Item));
@@ -173,7 +174,6 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
     }
   };
 
-  // ===== Generar PDF (cliente) =====
   const handleDownloadPDF = async () => {
     try {
       setGenerating(true);
@@ -187,27 +187,17 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
         const emp = employees.find(e => e.id === it.employee_id);
         const page = pdf.addPage([595.28, 841.89]); // A4
         const { width } = page.getSize();
-
         const draw = (text: string, y: number, size = 12) => {
-          page.drawText(text, {
-            x: 40,
-            y,
-            size,
-            font,
-            color: rgb(0, 0, 0),
-          });
+          page.drawText(text, { x: 40, y, size, font, color: rgb(0, 0, 0) });
         };
-
         page.drawText(title, { x: 40, y: 800, size: 18, font, color: rgb(0, 0, 0) });
         page.drawLine({ start: { x: 40, y: 792 }, end: { x: width - 40, y: 792 }, color: rgb(0, 0, 0), thickness: 0.5 });
-
-        draw(`Empleado: ${empName(emp!)}`, 760);
+        draw(`Empleado: ${empName(emp)}`, 760);
         draw(`Bruto base:   ${(+it.base_gross || 0).toFixed(2)} €`, 730);
         draw(`IRPF:         ${(+it.irpf_amount || 0).toFixed(2)} €`, 710);
         draw(`Seg. Social (emp.): ${(+it.ss_emp_amount || 0).toFixed(2)} €`, 690);
         draw(`Seg. Social (empresario): ${(+it.ss_er_amount || 0).toFixed(2)} €`, 670);
         draw(`Neto:         ${(+it.net || 0).toFixed(2)} €`, 640, 14);
-
         draw(`Periodo: ${String(payroll?.period_month).padStart(2, '0')}/${payroll?.period_year}`, 600, 10);
         draw(`Nómina ID: ${payroll?.id}`, 582, 10);
       });
@@ -219,7 +209,6 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
       a.download = `nomina-${payroll?.period_year}-${String(payroll?.period_month).padStart(2, '0')}.pdf`;
       a.click();
       URL.revokeObjectURL(a.href);
-
       setFlash('PDF generado correctamente 📄');
     } catch (e: any) {
       setFlash('Error al generar PDF: ' + (e?.message || e));
@@ -227,32 +216,6 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
       setGenerating(false);
     }
   };
-
-  // ===== (Opcional) Subir PDF al Storage "nominas" =====
-  // Descomenta si quieres subir el PDF y guardar la URL en cada item.
-  // Ojo: subir un único PDF “general” (todas las personas) o
-  // uno por empleado. Aquí te dejo un ejemplo “general”:
-  //
-  // const handleUploadToStorage = async () => {
-  //   try {
-  //     setGenerating(true);
-  //     const pdf = await PDFDocument.create();
-  //     const font = await pdf.embedFont(StandardFonts.Helvetica);
-  //     // ... crea el PDF igual que en handleDownloadPDF ...
-  //     const bytes = await pdf.save();
-  //     const fileName = `periodos/${payroll?.period_year}/${String(payroll?.period_month).padStart(2, '0')}/nomina.pdf`;
-  //     const { data, error } = await supabase.storage.from('nominas').upload(fileName, new Blob([bytes], { type: 'application/pdf' }), { upsert: true });
-  //     if (error) throw error;
-  //     const { data: pub } = supabase.storage.from('nominas').getPublicUrl(fileName);
-  //     // Si quieres guardar la URL en payrolls:
-  //     await supabase.from('payrolls').update({ pdf_url: pub.publicUrl }).eq('id', payroll?.id);
-  //     setFlash('PDF subido ✔️');
-  //   } catch (e:any) {
-  //     setFlash('Error al subir PDF: ' + (e?.message || e));
-  //   } finally {
-  //     setGenerating(false);
-  //   }
-  // };
 
   if (loading) return <div className="p-6">Cargando editor…</div>;
   if (!payroll) return <div className="p-6">Nómina no encontrada.</div>;
@@ -297,7 +260,7 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
               const e = employees.find(x => x.id === r.employee_id);
               return (
                 <tr key={`${r.employee_id}`} className="border-t">
-                  <td className="px-3 py-2">{empName(e!)}</td>
+                  <td className="px-3 py-2">{empName(e)}</td>
                   <td className="px-3 py-2 text-right">
                     <input
                       type="number"
@@ -354,8 +317,6 @@ export default function PayrollEditorPage({ params }: { params: { id: string } }
         >
           {generating ? 'Generando…' : 'Descargar PDF'}
         </button>
-
-        {/* <button onClick={handleUploadToStorage} className="px-4 py-2 bg-emerald-600 text-white rounded">Subir a Storage</button> */}
       </div>
     </div>
   );
