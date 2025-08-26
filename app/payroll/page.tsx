@@ -1,3 +1,7 @@
+// Forzamos render dinámico y sin cache para evitar errores de RSC con cookies/Supabase
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
@@ -6,19 +10,22 @@ type PageProps = {
   searchParams?: Record<string, string | string[] | undefined>;
 };
 
-function supabaseServer() {
-  const cookieStore = cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
+function getSupabaseServerSafe() {
+  try {
+    const cookieStore = cookies();
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    if (!url || !key) return null;
+    return createServerClient(url, key, {
       cookies: {
         get: (name: string) => cookieStore.get(name)?.value,
         set: () => {},
         remove: () => {},
       },
-    }
-  );
+    });
+  } catch {
+    return null;
+  }
 }
 
 const MONTHS = [
@@ -46,16 +53,23 @@ export default async function PayrollPage({ searchParams }: PageProps) {
   );
   const openMonth = Number(typeof searchParams?.month === "string" ? searchParams.month : 0);
 
-  const supabase = supabaseServer();
-
-  // Cargar periodos del año (RLS se encarga del multi-tenant)
-  const { data: rows } = await supabase
-    .from("payrolls")
-    .select("id, year, month, status")
-    .eq("year", selectedYear);
+  // --- Carga segura de periodos (si Supabase falla, seguimos con lista vacía)
+  const supabase = getSupabaseServerSafe();
+  let rows: Array<{ id: string; year: number; month: number; status: string | null }> = [];
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("payrolls")
+        .select("id, year, month, status")
+        .eq("year", selectedYear);
+      if (!error && data) rows = data as any;
+    } catch {
+      // ignore
+    }
+  }
 
   const byMonth = new Map<number, { id: string; status: string | null }>();
-  for (const r of rows ?? []) byMonth.set(r.month, { id: r.id, status: r.status ?? "draft" });
+  for (const r of rows) byMonth.set(r.month, { id: r.id, status: r.status ?? "draft" });
 
   return (
     <div className="flex h-[calc(100vh-0px)]">
@@ -110,19 +124,22 @@ export default async function PayrollPage({ searchParams }: PageProps) {
                     ) : (
                       <button
                         onClick={async () => {
-                          const res = await fetch("/api/payroll/create", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            credentials: "same-origin",
-                            cache: "no-store",
-                            body: JSON.stringify({ year: selectedYear, month }),
-                          });
-                          const json = await res.json();
-                          if (res.ok && json.ok) {
-                            // abre el panel del mes recién creado
-                            location.href = `/payroll?year=${selectedYear}&month=${month}`;
-                          } else {
-                            alert(json.error ?? "No se ha podido crear el período.");
+                          try {
+                            const res = await fetch("/api/payroll/create", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              credentials: "same-origin",
+                              cache: "no-store",
+                              body: JSON.stringify({ year: selectedYear, month }),
+                            });
+                            const json = await res.json();
+                            if (res.ok && json.ok) {
+                              location.href = `/payroll?year=${selectedYear}&month=${month}`;
+                            } else {
+                              alert(json.error ?? "No se ha podido crear el período.");
+                            }
+                          } catch (e: any) {
+                            alert(e?.message ?? "Error de red creando la nómina.");
                           }
                         }}
                         className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50"
@@ -167,3 +184,4 @@ export default async function PayrollPage({ searchParams }: PageProps) {
     </div>
   );
 }
+
