@@ -63,8 +63,8 @@ export default function EmployeesList({ activeOrgId, onSelect, title = "Empleado
     if (!term) return employees;
     return employees.filter((e) => {
       const name =
-        e.full_name ??
-        [e.first_name, e.last_name].filter(Boolean).join(" ") ||
+        (e.full_name ??
+          [e.first_name, e.last_name].filter(Boolean).join(" ")) ||
         e.name ||
         "";
       return (
@@ -102,8 +102,8 @@ export default function EmployeesList({ activeOrgId, onSelect, title = "Empleado
         <ul className="mt-2 flex-1 overflow-auto px-2 pb-2">
           {filtered.map((e) => {
             const displayName =
-              e.full_name ??
-              [e.first_name, e.last_name].filter(Boolean).join(" ") ||
+              (e.full_name ??
+                [e.first_name, e.last_name].filter(Boolean).join(" ")) ||
               e.name ||
               "Empleado sin nombre";
             return (
