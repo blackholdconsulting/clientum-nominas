@@ -1,82 +1,76 @@
-// app/payroll/page.tsx
-import Link from "next/link";
+'use client';
 
-type Search = { year?: string };
+import { useMemo, useState } from 'react';
+import Link from 'next/link';
 
 const MONTHS = [
-  { n: 1, name: "Enero" },
-  { n: 2, name: "Febrero" },
-  { n: 3, name: "Marzo" },
-  { n: 4, name: "Abril" },
-  { n: 5, name: "Mayo" },
-  { n: 6, name: "Junio" },
-  { n: 7, name: "Julio" },
-  { n: 8, name: "Agosto" },
-  { n: 9, name: "Septiembre" },
-  { n: 10, name: "Octubre" },
-  { n: 11, name: "Noviembre" },
-  { n: 12, name: "Diciembre" },
+  { num: 1,  name: 'Enero' },
+  { num: 2,  name: 'Febrero' },
+  { num: 3,  name: 'Marzo' },
+  { num: 4,  name: 'Abril' },
+  { num: 5,  name: 'Mayo' },
+  { num: 6,  name: 'Junio' },
+  { num: 7,  name: 'Julio' },
+  { num: 8,  name: 'Agosto' },
+  { num: 9,  name: 'Septiembre' },
+  { num: 10, name: 'Octubre' },
+  { num: 11, name: 'Noviembre' },
+  { num: 12, name: 'Diciembre' },
 ];
 
-export default function PayrollPage({ searchParams }: { searchParams?: Search }) {
-  const year = Number(searchParams?.year ?? new Date().getFullYear()) || new Date().getFullYear();
+export default function PayrollHomePage() {
+  const currentYear = useMemo(() => new Date().getFullYear(), []);
+  const [year, setYear] = useState<number>(currentYear);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10">
-      <div className="mb-8">
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      <header className="mb-6 flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Gestión de Nóminas</h1>
-        <p className="text-sm text-muted-foreground">
-          Administra, genera y revisa las nóminas por periodo.
-        </p>
 
-        <div className="mt-4 inline-flex items-center gap-2">
-          <span className="text-sm">Año:</span>
-          <form className="inline-flex items-center gap-2">
-            <input
-              type="number"
-              name="year"
-              defaultValue={year}
-              className="w-24 rounded-md border px-2 py-1 text-sm"
-              min={2000}
-              max={9999}
-            />
-            <button className="rounded-md bg-neutral-900 text-white px-3 py-1 text-sm">
-              Cambiar
-            </button>
-          </form>
+        <div className="flex items-center gap-2">
+          <label htmlFor="year" className="text-sm">Año</label>
+          <select
+            id="year"
+            className="rounded border px-2 py-1"
+            value={year}
+            onChange={(e) => setYear(parseInt(e.target.value, 10))}
+          >
+            {Array.from({ length: 6 }, (_, i) => currentYear - 2 + i).map(y => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
         </div>
-      </div>
+      </header>
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {MONTHS.map((m) => (
-          <div key={m.n} className="rounded-lg border p-4 flex flex-col justify-between">
-            <div className="mb-4">
-              <div className="text-lg font-medium">{m.name}</div>
-              <div className="mt-2 text-sm text-muted-foreground">Sin nómina</div>
-              <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <div className="text-muted-foreground">BRUTO</div>
-                  <div className="font-semibold">0,00 €</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">NETO</div>
-                  <div className="font-semibold">0,00 €</div>
-                </div>
-              </div>
+          <article
+            key={m.num}
+            className="rounded-lg border bg-white p-4 shadow-sm"
+          >
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-lg font-medium">{m.name}</h2>
+              <span className="text-sm text-gray-500">
+                {String(m.num).padStart(2, '0')}/{year}
+              </span>
             </div>
 
-            {/* Este botón abre SIEMPRE el editor en nueva pestaña */}
-            <Link
-              href={`/payroll/period/${year}/${m.n}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700"
-            >
-              Editar nómina
-            </Link>
-          </div>
+            {/* Aquí puedes imprimir KPI del mes si quieres (bruto/neto acumulados, etc.) */}
+
+            <div className="mt-4">
+              {/* === BOTÓN EDITAR EN PESTAÑA NUEVA === */}
+              <Link
+                href={`/payroll/editor?year=${year}&month=${m.num}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex w-full items-center justify-center rounded bg-blue-600 px-3 py-2 text-white hover:bg-blue-700"
+              >
+                Editar nómina
+              </Link>
+            </div>
+          </article>
         ))}
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
