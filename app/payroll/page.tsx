@@ -29,7 +29,7 @@ export default function PayrollHome() {
       <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {MONTHS.map((label, idx) => {
           const month = idx + 1;
-          const href = `/payroll/editor/page?year=${year}&month=${month}`;
+          const href = `/payroll/editor/page
 
           return (
             <section
