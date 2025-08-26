@@ -84,8 +84,8 @@ export default async function PayrollPage({
     "use server";
     const y = Number(formData.get("y"));
     const m = Number(formData.get("m"));
-    await generatePayroll(y, m);              // <<–– genera/abre nómina en BD
-    redirect(`/payroll/period/${y}/${m}`);    // <<–– redirige al editor
+    await generatePayroll(y, m);              // crea (o abre) la nómina del periodo
+    redirect(`/payroll/period/${y}/${m}`);    // navega al editor del periodo
   }
 
   /** Cambio de año (SSR) */
@@ -201,7 +201,7 @@ export default async function PayrollPage({
                       </span>
                     </Fragment>
                   ) : (
-                    /* ➋ Aquí se conecta el botón al action */
+                    /* ➋ Botón conectado al Server Action */
                     <form action={createThenGo}>
                       <input type="hidden" name="y" value={year} />
                       <input type="hidden" name="m" value={month} />
