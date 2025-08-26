@@ -1,80 +1,94 @@
 'use server';
 
-import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { createServerClient } from '@/utils/supabase/server'; // tu helper actual
-import { revalidatePath } from 'next/cache';
+import { createSupabaseServer } from '@/utils/supabase/server';
 
-function pad2(n: number) { return n.toString().padStart(2, '0'); }
+type EnsureArgs = { year: number; month: number };
 
-export async function generatePayrollPdfAndStore(opts: {
-  payrollId: string;
-  employeeId: string;
-  userId: string;        // owner (empresa)
-  year: number;
-  month: number;
-}) {
-  const { payrollId, employeeId, userId, year, month } = opts;
-  const supabase = await createServerClient();
+export async function ensurePayrollPeriod({ year, month }: EnsureArgs): Promise<string> {
+  const supabase = await createSupabaseServer();
 
-  // 1) Trae los datos del item para pintar la nómina
-  const { data: item, error: eItem } = await supabase
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr) throw authErr;
+  if (!user) throw new Error('No session');
+
+  // 1) ¿Existe ya una nómina para este usuario/mes?
+  const { data: existing, error: selErr } = await supabase
+    .from('payrolls')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('period_year', year)
+    .eq('period_month', month)
+    .limit(1)
+    .maybeSingle();
+
+  if (selErr) throw selErr;
+
+  let payrollId = existing?.id as string | undefined;
+
+  // 2) Si no existe, la creamos
+  if (!payrollId) {
+    const { data: inserted, error: insErr } = await supabase
+      .from('payrolls')
+      .insert({
+        user_id: user.id,
+        period_year: year,
+        period_month: month,
+        status: 'draft', // o como lo llames en tu esquema
+        gross_total: 0,
+        net_total: 0,
+      })
+      .select('id')
+      .single();
+
+    if (insErr) throw insErr;
+    payrollId = inserted.id;
+  }
+
+  // 3) Traemos empleados del usuario
+  const { data: employees, error: empErr } = await supabase
+    .from('employees')
+    .select('id, base_salary, irpf_percent, ss_emp_percent, ss_er_percent')
+    .eq('user_id', user.id);
+
+  if (empErr) throw empErr;
+  if (!employees?.length) throw new Error('No hay empleados para este usuario');
+
+  // 4) ¿Hay ya líneas de esa nómina? (evita duplicar)
+  const { data: itemsExisting, error: itemsCheckErr } = await supabase
     .from('payroll_items')
-    .select(`
-      employee_id,
-      user_id,
-      base_gross, irpf_amount, ss_emp_amount, ss_er_amount, net
-    `)
-    .eq('payroll_id', payrollId)
-    .eq('employee_id', employeeId)
-    .single();
+    .select('id', { count: 'exact', head: true })
+    .eq('payroll_id', payrollId);
 
-  if (eItem || !item) throw new Error(`No payroll item: ${eItem?.message}`);
+  if (itemsCheckErr) throw itemsCheckErr;
 
-  // 2) Crea un PDF básico (puedes cambiarlo luego al formato oficial)
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595, 842]); // A4
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const draw = (text: string, y: number) =>
-    page.drawText(text, { x: 50, y, size: 12, font });
+  if ((itemsExisting as any)?.count === 0) {
+    // 5) Insertamos líneas precargadas desde los datos del empleado
+    const items = employees.map((e) => {
+      const base = Number(e.base_salary ?? 0);
+      const irpf = +(base * (Number(e.irpf_percent ?? 0) / 100)).toFixed(2);
+      const ssEmp = +(base * (Number(e.ss_emp_percent ?? 0) / 100)).toFixed(2);
+      const ssEr = +(base * (Number(e.ss_er_percent ?? 0) / 100)).toFixed(2);
+      const net = +(base - irpf - ssEmp).toFixed(2);
 
-  let y = 800;
-  draw('NÓMINA (borrador)', y); y -= 30;
-  draw(`Periodo: ${year}-${pad2(month)}`, y); y -= 20;
-  draw(`Empleado: ${employeeId}`, y); y -= 20;
-  draw(`Bruto base: ${item.base_gross?.toFixed?.(2) ?? item.base_gross} €`, y); y -= 20;
-  draw(`IRPF: ${item.irpf_amount?.toFixed?.(2) ?? item.irpf_amount} €`, y); y -= 20;
-  draw(`SS Trabajador: ${item.ss_emp_amount?.toFixed?.(2) ?? item.ss_emp_amount} €`, y); y -= 20;
-  draw(`SS Empresa: ${item.ss_er_amount?.toFixed?.(2) ?? item.ss_er_amount} €`, y); y -= 20;
-  draw(`Neto: ${item.net?.toFixed?.(2) ?? item.net} €`, y); y -= 20;
+      return {
+        payroll_id: payrollId!,
+        employee_id: e.id,
+        user_id: user.id,
+        base_gross: base,
+        irpf_amount: irpf,
+        ss_emp_amount: ssEmp,
+        ss_er_amount: ssEr,
+        net,
+      };
+    });
 
-  const pdfBytes = await pdfDoc.save();
+    const { error: insItemsErr } = await supabase.from('payroll_items').insert(items);
+    if (insItemsErr) throw insItemsErr;
+  }
 
-  // 3) Sube al bucket 'nominas'
-  const path = `${userId}/${year}-${pad2(month)}/nomina-${payrollId}-${employeeId}.pdf`;
+  // 6) Recalcula totales de cabecera (usa tu RPC/función SQL)
+  // Si tu función se llama recalc_payroll_totals(payroll uuid):
+  await supabase.rpc('recalc_payroll_totals', { payroll: payrollId });
 
-  // Nota: si usas Next 15, Buffer desde node: 'buffer' (no Edge runtime)
-  const { error: upErr } = await supabase.storage
-    .from('nominas')
-    .upload(path, new Blob([pdfBytes]), { upsert: true, contentType: 'application/pdf' });
-
-  if (upErr) throw new Error(`Upload PDF error: ${upErr.message}`);
-
-  // 4) Construye URL firmable (o pública si decides firmar bajo demanda)
-  const { data: signed } = await supabase.storage
-    .from('nominas')
-    .createSignedUrl(path, 60 * 60 * 24 * 30); // 30 días
-
-  const pdfUrl = signed?.signedUrl ?? null;
-
-  // 5) Guarda url en payroll_items
-  const { error: updErr } = await supabase
-    .from('payroll_items')
-    .update({ pdf_url: pdfUrl })
-    .eq('payroll_id', payrollId)
-    .eq('employee_id', employeeId);
-
-  if (updErr) throw new Error(`Update item pdf_url error: ${updErr.message}`);
-
-  revalidatePath(`/payroll/period/${year}/${month}`);
-  return { ok: true, pdfUrl };
+  return payrollId!;
 }
