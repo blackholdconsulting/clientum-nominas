@@ -30,7 +30,8 @@ export default function PayrollHome() {
       <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {MESES.map((mes, i) => {
           const month = i + 1;
-          const href = `/payroll/editor?year=${year}&month=${month}`;
+          // 👉 forzamos /payroll/editor/page
+          const href = `/payroll/editor/page?year=${year}&month=${month}`;
           return (
             <article
               key={mes}
