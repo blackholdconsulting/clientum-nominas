@@ -1,91 +1,165 @@
-import { createSupabaseServer } from "@/utils/supabase/server";
-import { finalizePayroll, saveItem } from "../../actions";
+'use server';
 
-export default async function PeriodPage({ params }: { params: { year: string; month: string } }) {
-  const year = Number(params.year);
-  const month = Number(params.month);
+import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
+import { createSupabaseServer } from '@/utils/supabase/server';
+
+// ====== SCHEMAS ======
+const ItemSchema = z.object({
+  itemId: z.string().uuid().optional(),
+  payrollId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  base_gross: z.coerce.number().min(0),
+  irpf_amount: z.coerce.number().min(0),
+  ss_emp_amount: z.coerce.number().min(0),
+  ss_er_amount: z.coerce.number().min(0),
+});
+
+export async function upsertPayrollItemAction(formData: FormData) {
+  const supabase = createSupabaseServer();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth?.user) throw new Error('No autorizado');
+
+  const parsed = ItemSchema.parse({
+    itemId: formData.get('itemId') || undefined,
+    payrollId: formData.get('payrollId'),
+    employeeId: formData.get('employeeId'),
+    base_gross: formData.get('base_gross'),
+    irpf_amount: formData.get('irpf_amount'),
+    ss_emp_amount: formData.get('ss_emp_amount'),
+    ss_er_amount: formData.get('ss_er_amount'),
+  });
+
+  // neto simple = bruto - irpf - ss trabajador
+  const net = parsed.base_gross - parsed.irpf_amount - parsed.ss_emp_amount;
+
+  if (parsed.itemId) {
+    const { error } = await supabase
+      .from('payroll_items')
+      .update({
+        base_gross: parsed.base_gross,
+        irpf_amount: parsed.irpf_amount,
+        ss_emp_amount: parsed.ss_emp_amount,
+        ss_er_amount: parsed.ss_er_amount,
+        net,
+      })
+      .eq('id', parsed.itemId);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from('payroll_items').insert({
+      payroll_id: parsed.payrollId,
+      employee_id: parsed.employeeId,
+      user_id: auth.user.id,
+      base_gross: parsed.base_gross,
+      irpf_amount: parsed.irpf_amount,
+      ss_emp_amount: parsed.ss_emp_amount,
+      ss_er_amount: parsed.ss_er_amount,
+      net,
+    });
+    if (error) throw error;
+  }
+
+  // Recalcula totales de cabecera
+  await supabase.rpc('recalc_payroll_totals', { payroll: parsed.payrollId }).catch(() => {});
+
+  // Revalida listado del período
+  const { data: p } = await supabase
+    .from('payrolls').select('period_year, period_month').eq('id', parsed.payrollId).single();
+
+  revalidatePath('/payroll');
+  if (p) revalidatePath(`/payroll/period/${p.period_year}/${p.period_month}`);
+}
+
+export async function finalizePayrollAction(payrollId: string) {
+  const supabase = createSupabaseServer();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth?.user) throw new Error('No autorizado');
+
+  // marca procesado
+  const { error } = await supabase
+    .from('payrolls')
+    .update({ processed_at: new Date().toISOString(), status: 'procesado' })
+    .eq('id', payrollId);
+  if (error) throw error;
+
+  // genera PDFs en storage
+  await generatePdfsForPayroll(payrollId);
+
+  const { data: p } = await supabase
+    .from('payrolls').select('period_year, period_month').eq('id', payrollId).single();
+
+  revalidatePath('/payroll');
+  if (p) revalidatePath(`/payroll/period/${p.period_year}/${p.period_month}`);
+}
+
+// ====== PDF ======
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+
+async function generatePdfsForPayroll(payrollId: string) {
   const supabase = createSupabaseServer();
 
-  // Garantiza que exista
-  const { data: payrollId } = await supabase.rpc("payroll_generate_period", { p_year: year, p_month: month });
+  const { data: items, error } = await supabase
+    .from('payroll_items')
+    .select(`
+      id, employee_id, base_gross, irpf_amount, ss_emp_amount, ss_er_amount, net,
+      employees:employee_id ( full_name, email, position ),
+      payrolls:payroll_id ( period_year, period_month )
+    `)
+    .eq('payroll_id', payrollId);
+  if (error) throw error;
+  if (!items?.length) return;
 
-  const { data: header } = await supabase.from("payrolls").select("*").eq("id", payrollId).single();
-  const { data: items } = await supabase
-    .from("payroll_items")
-    .select("id, employee_id, employees:employee_id(full_name,email), base_gross, irpf_amount, ss_emp_amount, ss_er_amount, net")
-    .eq("payroll_id", payrollId)
-    .order("created_at");
+  // bucket privado 'nominas'
+  for (const it of items) {
+    const pdfBytes = await buildPayrollPdf({
+      employee: it.employees,
+      item: it,
+      year: it.payrolls.period_year,
+      month: it.payrolls.period_month,
+    });
 
-  async function onSave(formData: FormData) {
-    "use server";
-    await saveItem(formData);
+    const filePath = `${it.employee_id}/${it.payrolls.period_year}-${String(it.payrolls.period_month).padStart(2,'0')}/nomina-${it.id}.pdf`;
+
+    // sube al bucket
+    const { error: upErr } = await supabase.storage
+      .from('nominas')
+      .upload(filePath, new Blob([pdfBytes], { type: 'application/pdf' }), { upsert: true });
+    if (upErr) throw upErr;
+
+    const pdfUrl = `nominas/${filePath}`;
+    await supabase.from('payroll_items').update({ pdf_url: pdfUrl }).eq('id', it.id);
   }
-
-  async function onFinalize() {
-    "use server";
-    await finalizePayroll(payrollId as string);
-  }
-
-  return (
-    <div className="max-w-6xl mx-auto py-6 px-4">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold">Nómina {month}/{year}</h1>
-        {header?.status === "draft" ? (
-          <form action={onFinalize}>
-            <button className="bg-emerald-600 text-white px-4 py-2 rounded">Finalizar & Generar PDFs</button>
-          </form>
-        ) : (
-          <span className="text-sm rounded bg-emerald-50 text-emerald-700 px-2 py-1">Finalizada</span>
-        )}
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="min-w-full border rounded-lg">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="p-2 text-left">Empleado</th>
-              <th className="p-2 text-right">Bruto</th>
-              <th className="p-2 text-right">IRPF</th>
-              <th className="p-2 text-right">SS Trab.</th>
-              <th className="p-2 text-right">SS Emp.</th>
-              <th className="p-2 text-right">Neto</th>
-              <th className="p-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {(items ?? []).map((r) => (
-              <tr key={r.id} className="border-t">
-                <td className="p-2">
-                  <div className="font-medium">{r.employees?.full_name ?? r.employee_id}</div>
-                  <div className="text-xs text-gray-500">{r.employees?.email}</div>
-                </td>
-                <td className="p-2 text-right">{Number(r.base_gross).toFixed(2)}</td>
-                <td className="p-2 text-right">{Number(r.irpf_amount).toFixed(2)}</td>
-                <td className="p-2 text-right">{Number(r.ss_emp_amount).toFixed(2)}</td>
-                <td className="p-2 text-right">{Number(r.ss_er_amount).toFixed(2)}</td>
-                <td className="p-2 text-right">{Number(r.net).toFixed(2)}</td>
-                <td className="p-2">
-                  {header?.status === "draft" && (
-                    <form action={onSave} className="flex gap-2 items-center">
-                      <input type="hidden" name="id" defaultValue={r.id} />
-                      <input name="base_gross" defaultValue={r.base_gross} className="w-24 border rounded px-2 py-1 text-right" />
-                      <input name="irpf_amount" defaultValue={r.irpf_amount} className="w-20 border rounded px-2 py-1 text-right" />
-                      <input name="ss_emp_amount" defaultValue={r.ss_emp_amount} className="w-20 border rounded px-2 py-1 text-right" />
-                      <input name="ss_er_amount" defaultValue={r.ss_er_amount} className="w-20 border rounded px-2 py-1 text-right" />
-                      <input name="net" defaultValue={r.net} className="w-24 border rounded px-2 py-1 text-right" />
-                      <button className="bg-[#1061FE] text-white px-3 py-1 rounded">Guardar</button>
-                    </form>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-6 text-right text-sm text-gray-600">
-        Totales — Bruto: <b>{Number(header?.gross_total ?? 0).toFixed(2)} €</b> · Neto: <b>{Number(header?.net_total ?? 0).toFixed(2)} €</b>
-      </div>
-    </div>
-  );
 }
+
+async function buildPayrollPdf({ employee, item, year, month }:{
+  employee: { full_name: string, email: string, position: string },
+  item: any, year: number, month: number
+}) {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([595, 842]); // A4
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const draw = (text: string, x: number, y: number, size = 11) =>
+    page.drawText(text, { x, y, size, font, color: rgb(0,0,0) });
+
+  // Encabezado simple
+  draw('RECIBO DE SALARIOS', 210, 800, 16);
+  draw(`Periodo: ${String(month).padStart(2,'0')}/${year}`, 30, 770);
+  draw(`Empleado: ${employee.full_name}`, 30, 750);
+  draw(`Puesto: ${employee.position ?? '-'}`, 30, 735);
+  draw(`Email: ${employee.email}`, 30, 720);
+
+  // Tabla simple
+  const y0 = 680;
+  draw('CONCEPTOS', 30, y0);
+  draw('Importe (€)', 480, y0);
+
+  draw('Salario bruto', 30, y0 - 25);      draw(format(item.base_gross), 480, y0 - 25);
+  draw('IRPF', 30, y0 - 45);               draw(`- ${format(item.irpf_amount)}`, 480, y0 - 45);
+  draw('Seg. Social (trab.)', 30, y0 - 65);draw(`- ${format(item.ss_emp_amount)}`, 480, y0 - 65);
+  draw('Seg. Social (emp.)', 30, y0 - 85); draw(format(item.ss_er_amount), 480, y0 - 85, );
+  draw('Neto a percibir', 30, y0 - 120, 13); draw(format(item.net), 480, y0 - 120, 13);
+
+  return await pdf.save();
+}
+
+function format(n: number) { return `€ ${Number(n || 0).toFixed(2)}`; }
