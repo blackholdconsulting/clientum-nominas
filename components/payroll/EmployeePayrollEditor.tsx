@@ -85,11 +85,13 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
   const totals = useMemo(() => {
     const pctIRPF = num(period?.irpf_pct ?? employee?.irpf_pct, 0);
     const pctSSTrab = num(period?.ss_emp_pct ?? employee?.ss_emp_pct, 0);
+    // Si el empleado no tiene ss_er_pct, toma la suma de breakdown
     const pctSSEmp = num(employee?.ss_er_pct, erCfg.cc + erCfg.unemp + erCfg.training + erCfg.fogasa + erCfg.atep);
     return compute({ items, pctIrpf: pctIRPF, pctSsEmp: pctSSTrab, pctSsEr: pctSSEmp });
   }, [items, period?.irpf_pct, period?.ss_emp_pct, employee?.irpf_pct, employee?.ss_emp_pct, employee?.ss_er_pct, erCfg]);
 
-  const isClosed = (period?.status ?? "draft") !== "draft";
+  const status = period?.status ?? "draft";
+  const isLocked = status !== "draft";   // closed o paid
 
   // === Validaciones ===
   const warnings = useMemo(() => {
@@ -107,7 +109,7 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
 
   // === MUTACIONES LÍNEAS ===
   const addItem = async (kind: "earning" | "deduction") => {
-    if (!period || !employeeId || isClosed) return;
+    if (!period || !employeeId || isLocked) return;
     const { data, error } = await supabase
       .from("payroll_items")
       .insert({
@@ -128,23 +130,23 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
 
   const updateItem = useCallback(
     async (id: string, patch: Partial<PayrollItem>) => {
-      if (isClosed) return;
+      if (isLocked) return;
       setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
       const { error } = await supabase.from("payroll_items").update(patch).eq("id", id);
       if (error) setErrorMsg(error.message);
     },
-    [supabase, isClosed]
+    [supabase, isLocked]
   );
 
   const deleteItem = async (id: string) => {
-    if (isClosed) return;
+    if (isLocked) return;
     const prev = items;
     setItems((p) => p.filter((i) => i.id !== id));
     const { error } = await supabase.from("payroll_items").delete().eq("id", id);
     if (error) { setErrorMsg(error.message); setItems(prev); }
   };
 
-  // === Guardar parámetros periodo (IRPF, SS trab y breakdown empresa) ===
+  // === Guardar parámetros periodo ===
   const savePeriodParams = async () => {
     if (!period) return;
     setSaving(true);
@@ -158,16 +160,16 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
     setSaving(false);
   };
 
-  // === Cerrar / Reabrir periodo ===
-  const setStatus = async (status: "draft" | "closed" | "paid") => {
+  // === Estado periodo ===
+  const setStatus = async (next: "draft" | "closed" | "paid") => {
     if (!period) return;
     const prev = period;
-    setPeriod({ ...period, status });
-    const { error } = await supabase.from("payrolls").update({ status }).eq("id", period.id);
+    setPeriod({ ...period, status: next });
+    const { error } = await supabase.from("payrolls").update({ status: next }).eq("id", period.id);
     if (error) { setErrorMsg(error.message); setPeriod(prev); }
   };
 
-  // === PDF simple ===
+  // === PDF ===
   const generatePDF = async () => {
     if (!period || !employeeId) return;
     setPdfState({ loading: true });
@@ -181,25 +183,8 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
     else setPdfState({ loading: false, url: json.url ?? null, msg: "PDF generado correctamente." });
   };
 
-  // === Firmar PDF (empresa y trabajador) ===
-  const signPDF = async () => {
-    if (!period || !employeeId) return;
-    const employerName = prompt("Nombre del firmante (empresa):") || undefined;
-    const employeeName = prompt("Nombre del trabajador/a (opcional):") || undefined;
-    setPdfState({ loading: true });
-    const res = await fetch("/api/payroll/receipt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        payrollId: period.id,
-        employeeId,
-        sign: { employerName, employeeName, withImages: true },
-      }),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.ok) setPdfState({ loading: false, msg: json.error ?? "Error firmando/generando PDF" });
-    else setPdfState({ loading: false, url: json.url ?? null, msg: "PDF firmado generado." });
-  };
+  const employeeName =
+    ((employee?.full_name) ?? [employee?.first_name, employee?.last_name].filter(Boolean).join(" ")) || "Empleado";
 
   // === RENDER ===
   if (loading) return <div className="flex h-full items-center justify-center text-sm text-gray-500">Cargando editor…</div>;
@@ -211,21 +196,22 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
   );
   if (!employeeId) return <div className="flex h-full items-center justify-center"><p className="text-sm text-gray-600">Selecciona un empleado en la columna izquierda.</p></div>;
 
-  const employeeName =
-    (employee?.full_name ?? [employee?.first_name, employee?.last_name].filter(Boolean).join(" ")) || "Empleado";
-
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
-          <h3 className="text-sm font-semibold text-gray-800">
-            {employeeName} · {String(month).padStart(2, "0")}/{year}
-          </h3>
-          <p className="text-xs text-gray-500">Periodo #{period.id} · Estado: {period.status ?? "—"}</p>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-gray-800">
+              {employeeName} · {String(month).padStart(2, "0")}/{year}
+            </h3>
+            <StatusBadge status={status} />
+          </div>
+          <p className="text-xs text-gray-500">Periodo #{period.id}</p>
         </div>
+
         <div className="flex items-center gap-2">
-          {!isClosed ? (
+          {status === "draft" && (
             <button
               onClick={() => setStatus("closed")}
               className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
@@ -233,7 +219,26 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
             >
               Cerrar nómina
             </button>
-          ) : (
+          )}
+          {status === "closed" && (
+            <>
+              <button
+                onClick={() => setStatus("paid")}
+                className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 shadow-sm hover:bg-emerald-50"
+                title="Marca el periodo como pagado"
+              >
+                Marcar como pagada
+              </button>
+              <button
+                onClick={() => setStatus("draft")}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                title="Permite editar nuevamente"
+              >
+                Reabrir
+              </button>
+            </>
+          )}
+          {status === "paid" && (
             <button
               onClick={() => setStatus("draft")}
               className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
@@ -242,6 +247,7 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
               Reabrir
             </button>
           )}
+
           <div className="text-right ml-2">
             <p className="text-xs text-gray-500">Neto a percibir</p>
             <p className="text-lg font-semibold">
@@ -254,14 +260,14 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
       {/* Contenido */}
       <div className="grid flex-1 grid-cols-12 gap-0">
         {/* LÍNEAS */}
-        <section className={cx("col-span-7 h-full overflow-auto", isClosed && "pointer-events-none opacity-60")}>
+        <section className={cx("col-span-7 h-full overflow-auto", isLocked && "pointer-events-none opacity-60")}>
           <div className="flex items-center justify-between px-4 py-3">
-            <div className="text-sm font-medium text-gray-700">Líneas {isClosed && <span className="text-xs text-gray-500">(bloqueado)</span>}</div>
+            <div className="text-sm font-medium text-gray-700">Líneas {isLocked && <span className="text-xs text-gray-500">(bloqueado)</span>}</div>
             <div className="flex items-center gap-2">
-              <button className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60" onClick={() => addItem("earning")} disabled={isClosed}>
+              <button className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60" onClick={() => addItem("earning")} disabled={isLocked}>
                 + Añadir devengo
               </button>
-              <button className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60" onClick={() => addItem("deduction")} disabled={isClosed}>
+              <button className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60" onClick={() => addItem("deduction")} disabled={isLocked}>
                 + Añadir deducción
               </button>
             </div>
@@ -277,7 +283,7 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
                       value={it.type ?? "earning"}
                       onChange={(e) => updateItem(it.id, { type: e.target.value as any })}
                       className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                      disabled={isClosed}
+                      disabled={isLocked}
                     >
                       <option value="earning">Devengo</option>
                       <option value="deduction">Deducción</option>
@@ -287,7 +293,7 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
                       placeholder="Código"
                       onChange={(e) => updateItem(it.id, { concept_code: e.target.value })}
                       className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
-                      disabled={isClosed}
+                      disabled={isLocked}
                     />
                   </div>
 
@@ -297,13 +303,13 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
                       placeholder="Concepto / descripción"
                       onChange={(e) => updateItem(it.id, { concept: e.target.value, description: e.target.value })}
                       className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm"
-                      disabled={isClosed}
+                      disabled={isLocked}
                     />
                     <select
                       value={it.category ?? "salarial"}
                       onChange={(e) => updateItem(it.id, { category: e.target.value as any })}
                       className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
-                      disabled={isClosed}
+                      disabled={isLocked}
                     >
                       <option value="salarial">Salarial</option>
                       <option value="no_salarial">No salarial</option>
@@ -317,7 +323,7 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
                       value={it.quantity ?? 1}
                       onChange={(e) => updateItem(it.id, { quantity: num(e.target.value, 1) })}
                       className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                      disabled={isClosed}
+                      disabled={isLocked}
                     />
                   </div>
 
@@ -328,29 +334,29 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
                       value={it.amount ?? 0}
                       onChange={(e) => updateItem(it.id, { amount: num(e.target.value, 0) })}
                       className={cx("w-full rounded-lg border px-2 py-1.5 text-sm", isDed ? "border-red-200 text-red-700" : "border-gray-200")}
-                      disabled={isClosed}
+                      disabled={isLocked}
                     />
                   </div>
 
                   <div className="col-span-1 text-right">
-                    <button onClick={() => deleteItem(it.id)} className="rounded-lg border border-red-200 bg-white px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-60" title="Eliminar línea" disabled={isClosed}>
+                    <button onClick={() => deleteItem(it.id)} className="rounded-lg border border-red-200 bg-white px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-60" title="Eliminar línea" disabled={isLocked}>
                       Eliminar
                     </button>
                   </div>
 
                   <div className="col-span-12 mt-2 grid grid-cols-12 gap-3">
                     <label className="col-span-3 flex items-center gap-2 text-xs text-gray-600">
-                      <input type="checkbox" checked={it.cotizable ?? true} onChange={(e) => updateItem(it.id, { cotizable: e.target.checked })} disabled={isClosed} />
+                      <input type="checkbox" checked={it.cotizable ?? true} onChange={(e) => updateItem(it.id, { cotizable: e.target.checked })} disabled={isLocked} />
                       Cotizable (base SS)
                     </label>
                     <label className="col-span-3 flex items-center gap-2 text-xs text-gray-600">
-                      <input type="checkbox" checked={it.sujeto_irpf ?? true} onChange={(e) => updateItem(it.id, { sujeto_irpf: e.target.checked })} disabled={isClosed} />
+                      <input type="checkbox" checked={it.sujeto_irpf ?? true} onChange={(e) => updateItem(it.id, { sujeto_irpf: e.target.checked })} disabled={isLocked} />
                       Sujeto a IRPF
                     </label>
                     <input
                       className="col-span-6 rounded-lg border border-gray-200 px-3 py-1.5 text-xs"
                       placeholder="Notas (opcional)" value={it.notes ?? ""} onChange={(e) => updateItem(it.id, { notes: e.target.value })}
-                      disabled={isClosed}
+                      disabled={isLocked}
                     />
                   </div>
                 </li>
@@ -372,7 +378,7 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
                     value={num(period?.irpf_pct ?? employee?.irpf_pct, 0)}
                     onChange={(e) => setPeriod((p) => (p ? { ...p, irpf_pct: num(e.target.value, 0) } : p))}
                     className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                    disabled={isClosed}
+                    disabled={isLocked}
                   />
                 </div>
                 <div>
@@ -382,30 +388,29 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
                     value={num(period?.ss_emp_pct ?? employee?.ss_emp_pct, 0)}
                     onChange={(e) => setPeriod((p) => (p ? { ...p, ss_emp_pct: num(e.target.value, 0) } : p))}
                     className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                    disabled={isClosed}
+                    disabled={isLocked}
                   />
                 </div>
               </div>
 
-              {/* Desglose empresa */}
               <div className="mt-3 grid grid-cols-2 gap-3">
-                <Param label="CC % (empresa)" value={erCfg.cc} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, cc: v } } as any : p))} disabled={isClosed} />
-                <Param label="Desempleo % (empresa)" value={erCfg.unemp} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, unemp: v } } as any : p))} disabled={isClosed} />
-                <Param label="Formación % (empresa)" value={erCfg.training} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, training: v } } as any : p))} disabled={isClosed} />
-                <Param label="FOGASA % (empresa)" value={erCfg.fogasa} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, fogasa: v } } as any : p))} disabled={isClosed} />
-                <Param label="AT/EP % (empresa)" value={erCfg.atep} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, atep: v } } as any : p))} disabled={isClosed} />
+                <Param label="CC % (empresa)" value={erCfg.cc} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, cc: v } } as any : p))} disabled={isLocked} />
+                <Param label="Desempleo % (empresa)" value={erCfg.unemp} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, unemp: v } } as any : p))} disabled={isLocked} />
+                <Param label="Formación % (empresa)" value={erCfg.training} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, training: v } } as any : p))} disabled={isLocked} />
+                <Param label="FOGASA % (empresa)" value={erCfg.fogasa} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, fogasa: v } } as any : p))} disabled={isLocked} />
+                <Param label="AT/EP % (empresa)" value={erCfg.atep} onChange={(v) => setPeriod((p) => (p ? { ...p, ss_er_breakdown: { ...(p as any).ss_er_breakdown, atep: v } } as any : p))} disabled={isLocked} />
               </div>
 
-              <div className="mt-3 flex items-center gap-2">
+              <div className="mt-3">
                 <button
-                  disabled={saving || isClosed}
+                  disabled={saving || isLocked}
                   onClick={savePeriodParams}
                   className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60"
                 >
                   {saving ? "Guardando…" : "Guardar parámetros"}
                 </button>
-                <span className="text-[11px] text-gray-500">* % empresa afectan solo a costes informativos.</span>
               </div>
+              <p className="mt-2 text-[11px] text-gray-500">* % empresa afecta solo a costes informativos.</p>
             </div>
 
             {/* Totales trabajador */}
@@ -416,8 +421,8 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
                 <Row k="Base IRPF" v={toEur(totals.baseIRPF)} />
                 <hr className="my-1 border-gray-100" />
                 <Row k="Devengos" v={toEur(totals.totalDevengos)} />
-                <Row k={`SS trabajador (${fmtPct(num(period?.ss_emp_pct ?? employee?.ss_emp_pct, 0))})`} v={toEur(totals.ssTrab)} />
-                <Row k={`IRPF (${fmtPct(num(period?.irpf_pct ?? employee?.irpf_pct, 0))})`} v={toEur(totals.irpf)} />
+                <Row k={`SS trabajador`} v={toEur(totals.ssTrab)} />
+                <Row k={`IRPF`} v={toEur(totals.irpf)} />
                 <Row k="Deducciones manuales" v={toEur(totals.totalDeduccionesManuales)} />
                 <hr className="my-1 border-gray-100" />
                 <Row k="Total deducciones" v={toEur(totals.totalDeducciones)} strong />
@@ -447,23 +452,13 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
             {/* Exportación PDF */}
             <div className="rounded-xl border border-gray-200 bg-white p-4">
               <h4 className="text-sm font-semibold text-gray-800">Exportación</h4>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  disabled={pdfState.loading}
-                  onClick={generatePDF}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60"
-                >
-                  {pdfState.loading ? "Generando PDF…" : "Generar PDF"}
-                </button>
-                <button
-                  disabled={pdfState.loading}
-                  onClick={signPDF}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60"
-                  title="Incluye nombres y (si existen) imágenes de firma desde el bucket 'signatures'"
-                >
-                  {pdfState.loading ? "Firmando…" : "Firmar y generar PDF"}
-                </button>
-              </div>
+              <button
+                disabled={pdfState.loading}
+                onClick={generatePDF}
+                className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60"
+              >
+                {pdfState.loading ? "Generando PDF…" : "Generar PDF"}
+              </button>
               {pdfState.msg ? <p className="mt-2 text-xs text-gray-500">{pdfState.msg}</p> : null}
               {pdfState.url ? (
                 <a href={pdfState.url} target="_blank" rel="noreferrer" className="mt-1 block text-xs text-blue-600 underline">
@@ -480,6 +475,20 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
   );
 }
 
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    draft: "bg-gray-100 text-gray-700 border-gray-200",
+    closed: "bg-amber-100 text-amber-800 border-amber-200",
+    paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  };
+  const label: Record<string, string> = { draft: "Borrador", closed: "Cerrada", paid: "Pagada" };
+  return (
+    <span className={cx("rounded-full border px-2 py-0.5 text-[11px] font-medium", map[status] ?? map["draft"])}>
+      {label[status] ?? status}
+    </span>
+  );
+}
+
 function Row({ k, v, strong, big }: { k: string; v: string; strong?: boolean; big?: boolean }) {
   return (
     <div className="flex items-center justify-between">
@@ -488,7 +497,6 @@ function Row({ k, v, strong, big }: { k: string; v: string; strong?: boolean; bi
     </div>
   );
 }
-
 function Param({ label, value, onChange, disabled }: { label: string; value: number; onChange: (v: number) => void; disabled?: boolean }) {
   return (
     <div>
@@ -503,10 +511,6 @@ function Param({ label, value, onChange, disabled }: { label: string; value: num
     </div>
   );
 }
-
 function toEur(n: number) {
   return (n ?? 0).toLocaleString(undefined, { style: "currency", currency: "EUR" });
-}
-function fmtPct(n: number) {
-  return `${(n ?? 0).toFixed(2)}%`;
 }
