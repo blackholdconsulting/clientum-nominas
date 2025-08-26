@@ -1,44 +1,54 @@
-'use server';
+// app/payroll/period/[year]/[month]/actions.ts
+"use server";
 
-import { createServerClient } from '@/utils/supabase/server'; // tu helper actual
-import { redirect } from 'next/navigation';
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { createSupabaseServer } from "@/utils/supabase/server"; // <-- usa tu helper real
 
-export async function openMonthEditorAction(year: number, month: number) {
-  const supabase = await createServerClient();
+export async function createDraftPayroll(formData: FormData) {
+  const year = Number(formData.get("year"));
+  const month = Number(formData.get("month"));
 
-  try {
-    // Quién es
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-    if (uErr || !userRes?.user) throw new Error('auth');
-
-    // Empleados del dueño
-    const { data: employees, error: eErr } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('user_id', userRes.user.id);
-    if (eErr) throw eErr;
-
-    // Crea (o mantiene) una nómina DRAFT por empleado
-    for (const emp of employees ?? []) {
-      const { error: upErr } = await supabase
-        .from('payrolls')
-        .upsert({
-          id: crypto.randomUUID(),
-          user_id: userRes.user.id,
-          employee_id: emp.id,
-          period_year: year,
-          period_month: month,
-          status: 'draft',
-        }, { onConflict: 'user_id,employee_id,period_year,period_month', ignoreDuplicates: true });
-
-      if (upErr && upErr.code !== '23505') throw upErr; // ignora duplicado
-    }
-
-    // A la lista/“editor del mes”
-    redirect(`/payroll/period/${year}/${month}/editor`);
-  } catch (err) {
-    console.error('[openMonthEditorAction]', err);
-    // si algo falla, al menos aterriza en la lista donde verás el error
-    redirect(`/payroll/period/${year}/${month}/editor?error=1`);
+  if (!year || !month) {
+    throw new Error("Periodo inválido.");
   }
+
+  const supabase = createSupabaseServer();
+
+  // Usuario
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user) {
+    throw new Error("Sesión no válida.");
+  }
+
+  // Crea o recupera si ya existe (evita duplicados)
+  const { data, error } = await supabase
+    .from("payrolls")
+    .upsert(
+      {
+        user_id: user.id,
+        period_year: year,
+        period_month: month,
+        status: "draft", // estado inicial
+      },
+      {
+        onConflict: "user_id,period_year,period_month",
+        ignoreDuplicates: false,
+      }
+    )
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("No se pudo crear la nómina: " + error.message);
+  }
+
+  // Opcional: podrías inicializar aquí items/empleados si lo deseas
+
+  // Refresca y vuelve al editor del periodo
+  revalidatePath(`/payroll/period/${year}/${month}`);
+  redirect(`/payroll/period/${year}/${month}`);
 }
