@@ -3,53 +3,57 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-function createSb() {
+function getSupabase() {
   const cookieStore = cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  return createServerClient(url, anon, {
+    cookies: {
+      get(name: string) {
+        return cookieStore.get(name)?.value;
       },
-    }
-  );
+      set(name: string, value: string, options: any) {
+        cookieStore.set({ name, value, ...options });
+      },
+      remove(name: string, options: any) {
+        cookieStore.set({ name, value: "", ...options });
+      },
+    },
+  });
 }
 
-export async function generateDraft(year: number, month: number) {
-  const sb = createSb();
+/**
+ * Crea (o reenlaza) el borrador de nómina del periodo y devuelve { ok, id | error }.
+ * IMPORTANTE: no hace redirect — la navegación la hace el cliente.
+ */
+export async function createPeriodDraft(year: number, month: number) {
+  try {
+    const supabase = getSupabase();
 
-  const { data, error } = await sb.rpc("payroll_generate_period", {
-    p_year: year,
-    p_month: month,
-  });
+    // Llama a la función SQL. Ajusta los nombres si tu función usa otros parámetros.
+    const { data, error } = await supabase.rpc("payroll_generate_period", {
+      p_year: year,
+      p_month: month,
+    });
 
-  if (error) throw new Error(error.message || "Error al generar nómina.");
+    if (error) {
+      return { ok: false as const, error: error.message };
+    }
 
-  // El RPC puede devolver distintos nombres para el id (según versión)
-  let id =
-    (data as any)?.payroll_id ??
-    (data as any)?.v_id ??
-    (data as any)?.id ??
-    undefined;
+    // La función que preparamos devuelve algo como { ok: true, payroll_id: <id> }
+    const id =
+      (data as any)?.payroll_id ??
+      (data as any)?.value ??
+      (data as any)?.id ??
+      null;
 
-  if (!id) {
-    // Fallback: coge la nómina creada/abierta del usuario para ese periodo
-    const { data: row, error: e2 } = await sb
-      .from("payrolls")
-      .select("id")
-      .eq("period_year", year)
-      .eq("period_month", month)
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    if (!id) {
+      return { ok: false as const, error: "Respuesta inválida del generador de nóminas." };
+    }
 
-    if (e2) throw new Error(e2.message);
-    if (!row) throw new Error("Respuesta inválida del generador de nóminas.");
-    id = row.id;
+    return { ok: true as const, id };
+  } catch (e: any) {
+    return { ok: false as const, error: e?.message || String(e) };
   }
-
-  return { ok: true, payroll_id: id as number };
 }
