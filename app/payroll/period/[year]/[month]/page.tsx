@@ -1,91 +1,106 @@
 // app/payroll/period/[year]/[month]/page.tsx
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-import { createSupabaseServer } from "@/utils/supabase/server";
 import Link from "next/link";
+import { createSupabaseServer } from "@/utils/supabase/server"; // <-- usa tu helper real
+import { createDraftPayroll } from "./actions";
 
-function eur(n?: number | null) {
-  return Number(n ?? 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" });
+type PageProps = {
+  params: { year: string; month: string };
+};
+
+function titleMonth(year: number, month: number) {
+  const m = new Date(year, month - 1, 1).toLocaleDateString("es-ES", {
+    month: "long",
+  });
+  return `${m} ${year}`; // p.ej. "agosto 2025"
 }
 
-export default async function PeriodEditor({
-  params,
-}: {
-  params: { year: string; month: string };
-}) {
+export default async function PeriodEditorPage({ params }: PageProps) {
   const year = Number(params.year);
   const month = Number(params.month);
 
-  const s = createSupabaseServer();
+  const supabase = createSupabaseServer();
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
 
-  // Cabecera de la nómina del periodo
-  const { data: payroll, error: pErr } = await s
+  if (userErr || !user) {
+    return (
+      <div className="mx-auto max-w-3xl p-6">
+        <h1 className="mb-4 text-xl font-semibold">
+          Editor de nómina {month}/{year}
+        </h1>
+        <p className="text-red-600">No hay sesión iniciada.</p>
+        <Link href="/payroll" className="mt-4 inline-block text-blue-600 underline">
+          Volver
+        </Link>
+      </div>
+    );
+  }
+
+  // ⚠️ Usamos maybeSingle para que NO reviente cuando no hay fila
+  const { data: payroll, error } = await supabase
     .from("payrolls")
-    .select("id, status")
+    .select("id, status, period_year, period_month")
+    .eq("user_id", user.id)
     .eq("period_year", year)
     .eq("period_month", month)
-    .single();
-
-  if (pErr) {
-    return (
-      <div className="max-w-6xl mx-auto p-6">
-        <h1 className="text-2xl font-semibold">Editor de nómina {month}/{year}</h1>
-        <p className="mt-4 text-red-600">
-          No se pudo abrir la nómina del periodo: {pErr.message}
-        </p>
-        <Link href="/payroll" className="mt-6 inline-block text-blue-600 underline">
-          Volver
-        </Link>
-      </div>
-    );
-  }
-
-  // Items + datos de empleado
-  const { data: items, error: iErr } = await s
-    .from("payroll_items")
-    .select("id, employee_id, base_gross, irpf_amount, ss_emp_amount, ss_er_amount, net, employees(full_name, email)")
-    .eq("payroll_id", payroll.id)
-    .order("employee_id");
-  if (iErr) {
-    return (
-      <div className="max-w-6xl mx-auto p-6">
-        <h1 className="text-2xl font-semibold">Editor de nómina {month}/{year}</h1>
-        <p className="mt-4 text-red-600">Error leyendo items: {iErr.message}</p>
-        <Link href="/payroll" className="mt-6 inline-block text-blue-600 underline">
-          Volver
-        </Link>
-      </div>
-    );
-  }
+    .maybeSingle();
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Editor de nómina {month}/{year}</h1>
-        <Link href="/payroll" className="text-blue-600 underline">Volver al listado</Link>
-      </div>
+    <div className="mx-auto max-w-5xl p-6">
+      <h1 className="mb-6 text-2xl font-semibold">
+        Editor de nómina {titleMonth(year, month)}
+      </h1>
 
-      <div className="mt-6 border rounded-lg divide-y">
-        {items?.map((it) => (
-          <div key={it.id} className="p-4 flex items-center justify-between">
-            <div>
-              <p className="font-medium">{(it as any).employees?.full_name ?? it.employee_id}</p>
-              <p className="text-sm text-slate-500">{(it as any).employees?.email}</p>
-            </div>
-            <div className="grid grid-cols-5 gap-4 text-right text-sm">
-              <div><p className="text-slate-500">Bruto</p><p>{eur(it.base_gross)}</p></div>
-              <div><p className="text-slate-500">IRPF</p><p>{eur(it.irpf_amount)}</p></div>
-              <div><p className="text-slate-500">SS Emp.</p><p>{eur(it.ss_emp_amount)}</p></div>
-              <div><p className="text-slate-500">SS Empr.</p><p>{eur(it.ss_er_amount)}</p></div>
-              <div><p className="text-slate-500">Neto</p><p>{eur(it.net)}</p></div>
-            </div>
+      {/* Estado vacío: no hay nómina creada aún */}
+      {!payroll ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-4">
+          <p className="mb-3 text-amber-800">
+            Aún no existe una nómina para este periodo.
+          </p>
+          <form action={createDraftPayroll}>
+            {/* Pasamos el periodo a la Action */}
+            <input type="hidden" name="year" value={year} />
+            <input type="hidden" name="month" value={month} />
+            <button
+              type="submit"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Crear borrador de nómina
+            </button>
+          </form>
+
+          <div className="mt-4">
+            <Link href="/payroll" className="text-blue-600 underline">
+              Volver
+            </Link>
           </div>
-        ))}
-        {(!items || items.length === 0) && (
-          <div className="p-6 text-slate-600">No hay empleados en este periodo.</div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <>
+          {/* Aquí renderiza tu editor real. 
+              De momento dejamos un “placeholder” con info mínima. */}
+          <div className="mb-6 rounded-md border bg-white p-4">
+            <p className="text-sm text-gray-600">ID: {payroll.id}</p>
+            <p className="text-sm text-gray-600">Estado: {payroll.status ?? "draft"}</p>
+          </div>
+
+          {/* Ejemplo: contenedor de pestañas, toolbar, etc. */}
+          <div className="rounded-md border bg-white p-4">
+            <p className="text-gray-800">
+              Aquí va el <strong>editor por empleado</strong>, líneas de nómina,
+              totales, etc.
+            </p>
+          </div>
+
+          <div className="mt-6">
+            <Link href="/payroll" className="text-blue-600 underline">
+              Volver a la lista de meses
+            </Link>
+          </div>
+        </>
+      )}
     </div>
   );
 }
