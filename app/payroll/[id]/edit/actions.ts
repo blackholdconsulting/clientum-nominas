@@ -1,9 +1,7 @@
 "use server";
-export const runtime = "nodejs"; // pdf-lib necesita Node, no Edge
 
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import { PDFDocument, StandardFonts } from "pdf-lib";
 
 function createSb() {
   const cookieStore = cookies();
@@ -24,17 +22,14 @@ function createSb() {
 export async function ensureItemsForEmployees(payrollId: number) {
   const sb = createSb();
 
-  // Nómina
   const { data: pay } = await sb
     .from("payrolls")
     .select("id, period_year, period_month")
     .eq("id", payrollId)
     .single();
 
-  // Empleados
   const { data: employees } = await sb.from("employees").select("id");
 
-  // Items existentes
   const { data: exist } = await sb
     .from("payroll_items")
     .select("employee_id")
@@ -42,15 +37,17 @@ export async function ensureItemsForEmployees(payrollId: number) {
 
   const existing = new Set((exist ?? []).map((r) => r.employee_id));
   const toCreate =
-    (employees ?? []).filter((e) => !existing.has(e.id)).map((e) => ({
-      payroll_id: payrollId,
-      employee_id: e.id,
-      base_gross: 0,
-      irpf_amount: 0,
-      ss_emp_amount: 0,
-      ss_er_amount: 0,
-      net: 0,
-    })) ?? [];
+    (employees ?? [])
+      .filter((e) => !existing.has(e.id))
+      .map((e) => ({
+        payroll_id: payrollId,
+        employee_id: e.id,
+        base_gross: 0,
+        irpf_amount: 0,
+        ss_emp_amount: 0,
+        ss_er_amount: 0,
+        net: 0,
+      })) ?? [];
 
   if (toCreate.length) {
     const { error } = await sb.from("payroll_items").insert(toCreate);
@@ -82,7 +79,7 @@ export async function upsertItem(row: {
   return data;
 }
 
-/** Genera PDF de una línea y lo sube a Storage, devolviendo la URL pública */
+/** Genera PDF de una línea, sube a Storage y guarda la URL en la fila */
 export async function generateItemPdf(itemId: number) {
   const sb = createSb();
 
@@ -100,7 +97,10 @@ export async function generateItemPdf(itemId: number) {
     .single();
   if (ei) throw new Error(ei.message);
 
-  // --- PDF simple (ajusta a tu diseño) ---
+  // Import dinámico para evitar restricciones de "use server"
+  const { PDFDocument, StandardFonts } = await import("pdf-lib");
+
+  // --- PDF simple ---
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595, 842]); // A4
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -113,34 +113,31 @@ export async function generateItemPdf(itemId: number) {
 
   draw(`Nómina ${item.payroll.period_month}/${item.payroll.period_year}`, 16);
   draw(`Empleado: ${item.employee.full_name}`);
-  draw(`Bruto: ${item.base_gross.toFixed(2)} €`);
-  draw(`IRPF: ${item.irpf_amount.toFixed(2)} €`);
-  draw(`SS Empleado: ${item.ss_emp_amount.toFixed(2)} €`);
-  draw(`SS Empresa: ${item.ss_er_amount.toFixed(2)} €`);
-  draw(`Neto: ${item.net.toFixed(2)} €`, 14);
+  draw(`Bruto: ${Number(item.base_gross || 0).toFixed(2)} €`);
+  draw(`IRPF: ${Number(item.irpf_amount || 0).toFixed(2)} €`);
+  draw(`SS Empleado: ${Number(item.ss_emp_amount || 0).toFixed(2)} €`);
+  draw(`SS Empresa: ${Number(item.ss_er_amount || 0).toFixed(2)} €`);
+  draw(`Neto: ${Number(item.net || 0).toFixed(2)} €`, 14);
 
   const bytes = await pdfDoc.save();
 
-  // Subir archivo
   const filePath = `${item.employee_id}/${item.payroll.period_year}-${String(
     item.payroll.period_month
   ).padStart(2, "0")}/nomina-${item.id}.pdf`;
 
-  // upsert en bucket 'nominas'
+  // Subir a bucket 'nominas' (upsert)
   const { error: upErr } = await sb.storage
     .from("nominas")
     .upload(filePath, Buffer.from(bytes), {
       contentType: "application/pdf",
       upsert: true,
     });
-
   if (upErr) throw new Error(upErr.message);
 
-  // URL pública
+  // URL pública (usa políticas según tu seguridad)
   const { data: pub } = sb.storage.from("nominas").getPublicUrl(filePath);
   const url = pub.publicUrl;
 
-  // Guarda URL en la línea
   await sb.from("payroll_items").update({ pdf_url: url }).eq("id", itemId);
 
   return { ok: true, url };
