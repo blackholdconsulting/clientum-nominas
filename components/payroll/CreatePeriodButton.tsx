@@ -1,16 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
-export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defaultYear?: number; defaultMonth?: number }) {
+export default function CreatePeriodButton({
+  defaultYear,
+  defaultMonth,
+}: { defaultYear?: number; defaultMonth?: number }) {
   const now = useMemo(() => new Date(), []);
   const [year, setYear] = useState<number>(defaultYear ?? now.getFullYear());
-  const [month, setMonth] = useState<number>(defaultMonth ?? (now.getMonth() + 1));
+  const [month, setMonth] = useState<number>(defaultMonth ?? now.getMonth() + 1);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const router = useRouter();
-  const qp = useSearchParams();
 
   const months = [
     "01 · Enero","02 · Febrero","03 · Marzo","04 · Abril","05 · Mayo","06 · Junio",
@@ -24,6 +26,8 @@ export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defa
       const res = await fetch("/api/payroll/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
         body: JSON.stringify({ year, month }),
       });
       const json = await res.json();
@@ -31,9 +35,7 @@ export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defa
         setMsg(json.error ?? "No se ha podido crear el periodo.");
       } else {
         setMsg(json.created ? "Nómina creada." : "La nómina ya existía.");
-        // Refrescar listado y abrir editor
-        const target = `/payroll?year=${year}&month=${month}`;
-        router.push(target);
+        router.push(`/payroll?year=${year}&month=${month}`); // abre panel
         router.refresh();
       }
     } catch (e: any) {
@@ -54,23 +56,19 @@ export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defa
           <option key={idx + 1} value={idx + 1}>{label}</option>
         ))}
       </select>
-
       <input
         type="number"
         value={year}
         onChange={(e) => setYear(Number(e.target.value))}
-        className="w-[92px] rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm"
+        className="w-[88px] rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm"
       />
-
       <button
         onClick={submit}
         disabled={busy}
-        className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-60"
-        title="Crea el periodo de nómina si no existe"
+        className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:opacity-60"
       >
         {busy ? "Creando…" : "Crear nómina"}
       </button>
-
       {msg ? <span className="text-xs text-gray-500">{msg}</span> : null}
     </div>
   );
