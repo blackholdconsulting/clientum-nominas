@@ -32,10 +32,10 @@ export async function POST(req: NextRequest) {
 
     const supabase = supabaseServer();
 
-    // ¿Existe ya?
+    // ¿ya existe?
     const { data: existing, error: exErr } = await supabase
       .from("payrolls")
-      .select("id, year, month")
+      .select("id")
       .eq("year", year)
       .eq("month", month)
       .limit(1);
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, id: existing[0].id, created: false });
     }
 
-    // org_id: si user está en una sola org, usa esa; si hay varias y no viene orgId => error
+    // org_id (si user tiene una única org, úsala)
     let orgId = providedOrgId;
     if (!orgId) {
       const { data: memberships, error: memErr } = await supabase
@@ -52,22 +52,21 @@ export async function POST(req: NextRequest) {
         .select("org_id")
         .limit(2);
       if (memErr) throw new Error(memErr.message);
-      if ((memberships ?? []).length === 1) {
-        orgId = memberships![0].org_id as string;
-      } else if (!orgId) {
+      if ((memberships ?? []).length === 1) orgId = memberships![0].org_id as string;
+      if (!orgId && (memberships ?? []).length !== 1) {
         return NextResponse.json({ ok: false, error: "Varias organizaciones: proporciona orgId." }, { status: 400 });
       }
     }
 
-    // Inserta manejando org_id vs organization_id
+    // Inserta con org_id; si no existe la columna, reintenta con organization_id
     let payload: any = { year, month, status: "draft" as const };
     if (orgId) payload.org_id = orgId;
 
-    let ins = await supabase.from("payrolls").insert(payload).select("*").single();
+    let ins = await supabase.from("payrolls").insert(payload).select("id").single();
     if (ins.error && /column .*org_id.* does not exist/i.test(ins.error.message)) {
       payload = { year, month, status: "draft" as const };
       if (orgId) (payload as any).organization_id = orgId;
-      ins = await supabase.from("payrolls").insert(payload).select("*").single();
+      ins = await supabase.from("payrolls").insert(payload).select("id").single();
     }
     if (ins.error) throw new Error(ins.error.message);
 
