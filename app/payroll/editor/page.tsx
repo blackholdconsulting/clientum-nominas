@@ -1,45 +1,52 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import EmployeesList from "@/components/payroll/EmployeesList";
 import Link from "next/link";
 
-type PageProps = {
-  searchParams?: { year?: string; month?: string; employee?: string };
-};
+type PageProps = { searchParams?: { year?: string; month?: string; employee?: string } };
 
-function supabaseServer() {
-  const cookieStore = cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
+function getSupabaseServerSafe() {
+  try {
+    const cookieStore = cookies();
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    if (!url || !key) return null;
+    return createServerClient(url, key, {
       cookies: {
         get: (name: string) => cookieStore.get(name)?.value,
         set: () => {},
         remove: () => {},
       },
-    }
-  );
+    });
+  } catch { return null; }
 }
 
 export default async function PayrollEditorPage({ searchParams }: PageProps) {
   const year = Number(searchParams?.year ?? 0);
   const month = Number(searchParams?.month ?? 0);
 
-  const supabase = supabaseServer();
-
-  // Comprueba si existe el período
-  const { data: period } = await supabase
-    .from("payrolls")
-    .select("id, year, month, status, ss_er_breakdown")
-    .eq("year", year)
-    .eq("month", month)
-    .limit(1)
-    .maybeSingle();
+  const supabase = getSupabaseServerSafe();
+  let period: any = null;
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from("payrolls")
+        .select("id, year, month, status, ss_er_breakdown")
+        .eq("year", year)
+        .eq("month", month)
+        .limit(1)
+        .maybeSingle();
+      period = data ?? null;
+    } catch {
+      // ignore
+    }
+  }
 
   return (
     <div className="flex h-full">
-      {/* Columna izquierda: Empleados */}
       <aside className="w-[360px] shrink-0 border-r bg-white">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
@@ -55,7 +62,6 @@ export default async function PayrollEditorPage({ searchParams }: PageProps) {
         <EmployeesList year={year} month={month} />
       </aside>
 
-      {/* Columna derecha: contenido */}
       <main className="flex flex-1 items-center justify-center bg-gray-50">
         {period ? (
           <div className="text-center">
@@ -83,10 +89,7 @@ export default async function PayrollEditorPage({ searchParams }: PageProps) {
               Crear período {String(month).padStart(2, "0")}/{year}
             </button>
             <div className="mt-3">
-              <Link
-                href="/payroll"
-                className="text-xs text-gray-500 underline hover:text-gray-700"
-              >
+              <Link href="/payroll" className="text-xs text-gray-500 underline hover:text-gray-700">
                 Volver a Nóminas
               </Link>
             </div>
