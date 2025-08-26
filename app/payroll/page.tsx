@@ -1,5 +1,7 @@
-// app/payroll/page.tsx
-import Link from "next/link";
+"use client";
+
+import { useState } from "react";
+import EditorPanel from "@/components/payroll/EditorPanel";
 
 const MONTHS = [
   "Enero",
@@ -19,6 +21,19 @@ const MONTHS = [
 export default function PayrollHome() {
   const year = new Date().getFullYear();
 
+  // Estado del panel (abierto/cerrado y periodo seleccionado)
+  const [open, setOpen] = useState(false);
+  const [selectedYear, setSelectedYear] = useState<number | undefined>();
+  const [selectedMonth, setSelectedMonth] = useState<number | undefined>();
+
+  const openEditor = (y: number, m: number) => {
+    setSelectedYear(y);
+    setSelectedMonth(m);
+    setOpen(true);
+  };
+
+  const closeEditor = () => setOpen(false);
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <h1 className="text-2xl font-semibold mb-6">Gestión de Nóminas</h1>
@@ -29,7 +44,6 @@ export default function PayrollHome() {
       <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {MONTHS.map((label, idx) => {
           const month = idx + 1;
-          const href = `/payroll/editor/page
 
           return (
             <section
@@ -48,20 +62,25 @@ export default function PayrollHome() {
               </p>
 
               <div className="pt-2">
-                <Link
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  prefetch={false}
+                <button
+                  onClick={() => openEditor(year, month)}
                   className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
                 >
                   Editar nómina
-                </Link>
+                </button>
               </div>
             </section>
           );
         })}
       </div>
+
+      {/* Panel con el editor embebido (iframe con /payroll/editor?year=..&month=..) */}
+      <EditorPanel
+        open={open}
+        year={selectedYear}
+        month={selectedMonth}
+        onClose={closeEditor}
+      />
     </main>
   );
 }
