@@ -1,121 +1,69 @@
-// app/payroll/page.tsx
-import Link from "next/link";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+'use client';
 
-function esMonthName(m: number) {
-  const months = [
-    "enero","febrero","marzo","abril","mayo","junio",
-    "julio","agosto","septiembre","octubre","noviembre","diciembre",
-  ];
-  return months[m - 1];
-}
+import Link from 'next/link';
 
-export default async function PayrollHome({
-  searchParams,
-}: {
-  searchParams: { year?: string };
-}) {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: () => cookieStore }
-  );
+const MESES = [
+  'Enero','Febrero','Marzo','Abril','Mayo','Junio',
+  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
+];
 
-  // Año seleccionado (por defecto, el actual)
+export default function PayrollHome() {
   const now = new Date();
-  const selectedYear =
-    Number(searchParams?.year ?? now.getFullYear());
-
-  // (Opcional) puedes calcular métricas reales si quieres
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id")
-    .single();
+  const year = now.getFullYear();
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-10">
-      <div className="mb-8 flex items-center justify-between">
+    <main className="mx-auto max-w-6xl px-6 py-10">
+      <header className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Gestión de nóminas
+          <h1 className="text-2xl font-semibold text-slate-900">
+            Gestión de Nóminas
           </h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Administra, genera y revisa las nóminas por periodo.
+          <p className="mt-1 text-slate-600">
+            Selecciona un período para preparar las nóminas de tus empleados.
           </p>
         </div>
+        <div className="rounded-lg bg-slate-50 px-4 py-2 text-slate-700">
+          Año <span className="font-semibold">{year}</span>
+        </div>
+      </header>
 
-        {/* Selector simple del año (si quieres hacerlo interactivo, usa client component) */}
-        <div className="text-right">
-          <div className="text-sm text-gray-600">Año</div>
-          <div className="text-lg font-medium">
-            {selectedYear}
-          </div>
-        </div>
-      </div>
-
-      {/* Tarjetas resumen (simples) */}
-      <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="rounded-xl border bg-white p-5 shadow-sm">
-          <div className="text-sm text-gray-600">Bruto acumulado</div>
-          <div className="mt-1 text-2xl font-semibold">0,00 €</div>
-        </div>
-        <div className="rounded-xl border bg-white p-5 shadow-sm">
-          <div className="text-sm text-gray-600">Neto acumulado</div>
-          <div className="mt-1 text-2xl font-semibold">0,00 €</div>
-        </div>
-        <div className="rounded-xl border bg-white p-5 shadow-sm">
-          <div className="text-sm text-gray-600">Nóminas finalizadas</div>
-          <div className="mt-1 text-2xl font-semibold">0 / 12</div>
-        </div>
-      </div>
-
-      {/* Cuadrícula de meses */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
-          <div
-            key={month}
-            className="rounded-xl border bg-white p-5 shadow-sm"
-          >
-            <div className="flex items-baseline justify-between">
-              <div>
-                <div className="text-xs uppercase tracking-wider text-gray-500">
-                  Mes
+      <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {MESES.map((mes, i) => {
+          const month = i + 1;
+          const href = `/payroll/editor?year=${year}&month=${month}`;
+          return (
+            <article
+              key={mes}
+              className="rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md"
+            >
+              <div className="p-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium text-slate-900">{mes}</h3>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                    {String(month).padStart(2, '0')}/{year}
+                  </span>
                 </div>
-                <div className="text-lg font-semibold">
-                  {esMonthName(month)} {selectedYear}
+
+                <p className="mt-2 text-sm text-slate-600">
+                  Prepara, revisa y guarda las nóminas de tu equipo para este mes.
+                </p>
+
+                <div className="mt-5 flex gap-3">
+                  <Link
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    prefetch={false}
+                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                  >
+                    Editar nómina
+                  </Link>
                 </div>
               </div>
-
-              {/* Totales del mes (placeholders) */}
-              <div className="text-right">
-                <div className="text-xs text-gray-500">Bruto</div>
-                <div className="text-sm font-medium">0,00 €</div>
-              </div>
-            </div>
-
-            <div className="mt-4 text-sm text-gray-500">
-              Sin nómina
-            </div>
-
-            <div className="mt-4">
-              {/* IMPORTANTE: abre /payroll/editor en una pestaña nueva */}
-              <Link
-                href={{
-                  pathname: "/payroll/editor",
-                  query: { year: selectedYear, month },
-                }}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none"
-              >
-                Editar nómina
-              </Link>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+            </article>
+          );
+        })}
+      </section>
+    </main>
   );
 }
