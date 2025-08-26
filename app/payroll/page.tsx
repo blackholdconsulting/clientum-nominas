@@ -18,13 +18,8 @@ const MONTHS = [
   { n: 12, name: "Diciembre" },
 ];
 
-export default function PayrollPage({
-  searchParams,
-}: {
-  searchParams?: Search;
-}) {
-  const year =
-    Number(searchParams?.year ?? new Date().getFullYear()) || new Date().getFullYear();
+export default function PayrollPage({ searchParams }: { searchParams?: Search }) {
+  const year = Number(searchParams?.year ?? new Date().getFullYear()) || new Date().getFullYear();
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
@@ -33,6 +28,7 @@ export default function PayrollPage({
         <p className="text-sm text-muted-foreground">
           Administra, genera y revisa las nóminas por periodo.
         </p>
+
         <div className="mt-4 inline-flex items-center gap-2">
           <span className="text-sm">Año:</span>
           <form className="inline-flex items-center gap-2">
@@ -53,14 +49,10 @@ export default function PayrollPage({
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {MONTHS.map((m) => (
-          <div
-            key={m.n}
-            className="rounded-lg border p-4 flex flex-col justify-between"
-          >
+          <div key={m.n} className="rounded-lg border p-4 flex flex-col justify-between">
             <div className="mb-4">
               <div className="text-lg font-medium">{m.name}</div>
               <div className="mt-2 text-sm text-muted-foreground">Sin nómina</div>
-
               <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <div className="text-muted-foreground">BRUTO</div>
@@ -73,7 +65,7 @@ export default function PayrollPage({
               </div>
             </div>
 
-            {/* IMPORTANTE: este botón abre el editor en una pestaña nueva */}
+            {/* Este botón abre SIEMPRE el editor en nueva pestaña */}
             <Link
               href={`/payroll/period/${year}/${m.n}`}
               target="_blank"
