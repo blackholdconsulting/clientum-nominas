@@ -5,8 +5,6 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-export const runtime = "nodejs"; // <- evita Edge
-
 function getSupabase() {
   const cookieStore = cookies();
   return createServerClient(
@@ -52,7 +50,6 @@ export async function createDraftPayroll(formData: FormData) {
     .eq("period_year", year)
     .eq("period_month", month)
     .maybeSingle();
-
   if (exErr) throw exErr;
 
   let payrollId = existing?.id;
@@ -80,12 +77,12 @@ export async function createDraftPayroll(formData: FormData) {
     .eq("user_id", user.id);
   if (empErr) throw empErr;
 
+  // 3) upsert líneas por empleado (evita duplicados por periodo)
   if ((employees ?? []).length > 0) {
-    // upsert: evita duplicados por (payroll_id, employee_id)
     const rows = employees!.map((e) => ({
       payroll_id: payrollId,
       employee_id: e.id,
-      user_id: user.id, // si tu tabla payroll_items lleva user_id (recomendado)
+      user_id: user.id, // si tu tabla payroll_items tiene user_id
       base_gross: 0,
       irpf_amount: 0,
       ss_emp_amount: 0,
@@ -95,10 +92,10 @@ export async function createDraftPayroll(formData: FormData) {
 
     const { error: upErr } = await supabase
       .from("payroll_items")
-      .upsert(rows, { onConflict: "payroll_id,employee_id" }); // requiere unique en BD
+      .upsert(rows, { onConflict: "payroll_id,employee_id" }); // requiere índice único
     if (upErr) throw upErr;
   }
 
-  // 3) Revalida la página del editor
+  // 4) Revalida la página del editor
   revalidatePath(`/payroll/period/${year}/${month}`);
 }
