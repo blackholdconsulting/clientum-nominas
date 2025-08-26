@@ -1,106 +1,117 @@
-// app/payroll/period/[year]/[month]/page.tsx
-import Link from "next/link";
-import { createSupabaseServer } from "@/utils/supabase/server"; // <-- usa tu helper real
-import { createDraftPayroll } from "./actions";
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+import Link from 'next/link';
+import { createDraftPayroll } from './actions';
 
-type PageProps = {
+function supabaseServer() {
+  const cookieStore = cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name: string, value: string, options: any) {
+          cookieStore.set({ name, value, ...options });
+        },
+        remove(name: string, options: any) {
+          cookieStore.delete({ name, ...options });
+        },
+      },
+    }
+  );
+}
+
+type Props = {
   params: { year: string; month: string };
 };
 
-function titleMonth(year: number, month: number) {
-  const m = new Date(year, month - 1, 1).toLocaleDateString("es-ES", {
-    month: "long",
-  });
-  return `${m} ${year}`; // p.ej. "agosto 2025"
-}
-
-export default async function PeriodEditorPage({ params }: PageProps) {
+export default async function PayrollEditorPage({ params }: Props) {
   const year = Number(params.year);
   const month = Number(params.month);
 
-  const supabase = createSupabaseServer();
+  const supabase = supabaseServer();
+
   const {
     data: { user },
-    error: userErr,
   } = await supabase.auth.getUser();
 
-  if (userErr || !user) {
-    return (
-      <div className="mx-auto max-w-3xl p-6">
-        <h1 className="mb-4 text-xl font-semibold">
-          Editor de nómina {month}/{year}
-        </h1>
-        <p className="text-red-600">No hay sesión iniciada.</p>
-        <Link href="/payroll" className="mt-4 inline-block text-blue-600 underline">
-          Volver
-        </Link>
-      </div>
-    );
-  }
-
-  // ⚠️ Usamos maybeSingle para que NO reviente cuando no hay fila
-  const { data: payroll, error } = await supabase
-    .from("payrolls")
-    .select("id, status, period_year, period_month")
-    .eq("user_id", user.id)
-    .eq("period_year", year)
-    .eq("period_month", month)
+  // Buscar cabecera (SIN .single() a pelo)
+  const { data: payroll, error: payErr } = await supabase
+    .from('payrolls')
+    .select('id, status, period_year, period_month, gross_total, net_total')
+    .eq('period_year', year)
+    .eq('period_month', month)
+    .eq('user_id', user?.id ?? '')
+    .limit(1)
     .maybeSingle();
 
+  const monthName = new Date(year, month - 1, 1).toLocaleDateString('es-ES', {
+    month: 'long',
+  });
+
   return (
-    <div className="mx-auto max-w-5xl p-6">
-      <h1 className="mb-6 text-2xl font-semibold">
-        Editor de nómina {titleMonth(year, month)}
+    <main className="mx-auto max-w-4xl p-6">
+      <h1 className="text-2xl font-semibold mb-6">
+        Editor de nómina {monthName} {year}
       </h1>
 
-      {/* Estado vacío: no hay nómina creada aún */}
       {!payroll ? (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-4">
-          <p className="mb-3 text-amber-800">
-            Aún no existe una nómina para este periodo.
-          </p>
+        <div className="rounded-md border border-yellow-300 bg-yellow-50 p-4">
+          <p className="mb-4">Aún no existe una nómina para este período.</p>
+
+          {/* Botón -> server action */}
           <form action={createDraftPayroll}>
-            {/* Pasamos el periodo a la Action */}
             <input type="hidden" name="year" value={year} />
             <input type="hidden" name="month" value={month} />
             <button
               type="submit"
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
             >
               Crear borrador de nómina
             </button>
           </form>
 
           <div className="mt-4">
-            <Link href="/payroll" className="text-blue-600 underline">
+            <Link href="/payroll" className="text-indigo-700 hover:underline">
               Volver
             </Link>
           </div>
         </div>
       ) : (
-        <>
-          {/* Aquí renderiza tu editor real. 
-              De momento dejamos un “placeholder” con info mínima. */}
-          <div className="mb-6 rounded-md border bg-white p-4">
-            <p className="text-sm text-gray-600">ID: {payroll.id}</p>
-            <p className="text-sm text-gray-600">Estado: {payroll.status ?? "draft"}</p>
-          </div>
-
-          {/* Ejemplo: contenedor de pestañas, toolbar, etc. */}
+        <section className="space-y-6">
+          {/* Cabecera */}
           <div className="rounded-md border bg-white p-4">
-            <p className="text-gray-800">
-              Aquí va el <strong>editor por empleado</strong>, líneas de nómina,
-              totales, etc.
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">Estado</p>
+                <p className="font-medium">{payroll.status}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Bruto</p>
+                <p className="font-medium">{Number(payroll.gross_total).toFixed(2)} €</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Neto</p>
+                <p className="font-medium">{Number(payroll.net_total).toFixed(2)} €</p>
+              </div>
+            </div>
           </div>
 
-          <div className="mt-6">
-            <Link href="/payroll" className="text-blue-600 underline">
-              Volver a la lista de meses
+          {/* Aquí puedes renderizar la tabla de items de empleados, edición, etc. */}
+          <div className="rounded-md border bg-white p-4">
+            <p className="text-gray-600">🎛️ Aquí va el editor de líneas por empleado…</p>
+          </div>
+
+          <div>
+            <Link href="/payroll" className="text-indigo-700 hover:underline">
+              Volver
             </Link>
           </div>
-        </>
+        </section>
       )}
-    </div>
+    </main>
   );
 }
