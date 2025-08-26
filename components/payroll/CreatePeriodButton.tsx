@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defaultYear?: number; defaultMonth?: number }) {
   const now = useMemo(() => new Date(), []);
@@ -10,6 +10,7 @@ export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defa
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const router = useRouter();
+  const qp = useSearchParams();
 
   const months = [
     "01 · Enero","02 · Febrero","03 · Marzo","04 · Abril","05 · Mayo","06 · Junio",
@@ -29,8 +30,11 @@ export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defa
       if (!res.ok || !json.ok) {
         setMsg(json.error ?? "No se ha podido crear el periodo.");
       } else {
-        setMsg("Nómina creada.");
-        router.refresh(); // recargar lista
+        setMsg(json.created ? "Nómina creada." : "La nómina ya existía.");
+        // Refrescar listado y abrir editor
+        const target = `/payroll?year=${year}&month=${month}`;
+        router.push(target);
+        router.refresh();
       }
     } catch (e: any) {
       setMsg(e.message ?? "Error de red.");
@@ -55,7 +59,7 @@ export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defa
         type="number"
         value={year}
         onChange={(e) => setYear(Number(e.target.value))}
-        className="w-[90px] rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm"
+        className="w-[92px] rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm"
       />
 
       <button
@@ -71,4 +75,3 @@ export default function CreatePeriodButton({ defaultYear, defaultMonth }: { defa
     </div>
   );
 }
-
