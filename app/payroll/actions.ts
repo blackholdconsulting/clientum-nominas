@@ -1,44 +1,74 @@
 // app/payroll/actions.ts
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import { createSupabaseServer } from '@/utils/supabase/server';
+import { createSupabaseServer } from "@/utils/supabase/server";
+import { revalidatePath } from "next/cache";
 
-export async function createOrOpenPayrollAction(month: number, year: number) {
-  const supabase = createSupabaseServer();
+export async function generatePayroll(year: number, month: number) {
+  if (!year || !month) throw new Error("Periodo inválido");
 
-  // 1) Garantiza sesión
-  const { data: auth, error: authError } = await supabase.auth.getUser();
-  if (authError || !auth?.user) throw new Error('No autorizado');
+  const s = createSupabaseServer();
 
-  // 2) Genera/abre nómina por periodo (crea payroll y payroll_items si faltan)
-  const { data: rpc, error: rpcError } = await supabase.rpc('payroll_generate_period', {
-    p_year: year,
-    p_month: month,
-  });
+  const {
+    data: { user },
+    error: userErr,
+  } = await s.auth.getUser();
+  if (userErr || !user) throw new Error("Sesión no válida");
 
-  if (rpcError) {
-    console.error('RPC payroll_generate_period error', rpcError);
-    throw rpcError;
+  // 1) Upsert de cabecera (único por usuario+año+mes)
+  const { data: header, error: upsertErr } = await s
+    .from("payrolls")
+    .upsert(
+      {
+        user_id: user.id,
+        period_year: year,
+        period_month: month,
+        status: "draft",
+      },
+      { onConflict: "user_id,period_year,period_month" }
+    )
+    .select("id")
+    .single();
+
+  if (upsertErr) throw upsertErr;
+
+  const payrollId = header.id as string;
+
+  // 2) Trae empleados del usuario
+  const { data: employees, error: empErr } = await s
+    .from("employees")
+    .select("id")
+    .eq("user_id", user.id);
+  if (empErr) throw empErr;
+
+  // 3) Asegura items por empleado (solo los que falten)
+  if (employees && employees.length) {
+    const { data: existing, error: existErr } = await s
+      .from("payroll_items")
+      .select("employee_id")
+      .eq("payroll_id", payrollId);
+    if (existErr) throw existErr;
+
+    const existingIds = new Set((existing ?? []).map((r) => r.employee_id));
+    const rows = employees
+      .filter((e) => !existingIds.has(e.id))
+      .map((e) => ({
+        payroll_id: payrollId,
+        employee_id: e.id,
+        base_gross: 0,
+        irpf_amount: 0,
+        ss_emp_amount: 0,
+        ss_er_amount: 0,
+        net: 0,
+      }));
+
+    if (rows.length) {
+      const { error: insErr } = await s.from("payroll_items").insert(rows);
+      if (insErr) throw insErr;
+    }
   }
 
-  // 3) Revalida listado y pantalla del periodo
-  revalidatePath('/payroll');
-  revalidatePath(`/payroll/period/${year}/${month}`);
-  return rpc; // opcionalmente id de payroll
+  revalidatePath("/payroll");
+  return payrollId;
 }
 
-export async function listPayrollsByYear(year: number) {
-  const supabase = createSupabaseServer();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth?.user) return [];
-
-  const { data, error } = await supabase
-    .from('payrolls')
-    .select('id, period_year, period_month, status, gross_total, net_total, processed_at')
-    .eq('period_year', year)
-    .order('period_month', { ascending: true });
-
-  if (error) throw error;
-  return data ?? [];
-}
