@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 export type Employee = {
@@ -11,7 +12,7 @@ export type Employee = {
   email?: string | null;
   position?: string | null;
   job_title?: string | null;
-  // multi-tenant (si aplicara)
+  // multi-tenant (si aplica)
   org_id?: string | null;
   organization_id?: string | null;
 };
@@ -20,9 +21,16 @@ type Props = {
   activeOrgId?: string;
   onSelect?: (employee: Employee) => void;
   title?: string;
+  /** Si se pasa, se mostrará un enlace "Ver nómina →" que navega a la URL devuelta */
+  linkBuilder?: (employee: Employee) => string | null;
 };
 
-export default function EmployeesList({ activeOrgId, onSelect, title = "Empleados" }: Props) {
+export default function EmployeesList({
+  activeOrgId,
+  onSelect,
+  title = "Empleados",
+  linkBuilder,
+}: Props) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
@@ -34,7 +42,7 @@ export default function EmployeesList({ activeOrgId, onSelect, title = "Empleado
       setErrorMsg(null);
       const supabase = supabaseBrowser();
 
-      // Importante: solo ordenamos por columnas que EXISTEN en tu tabla.
+      // Ordenamos solo por columnas existentes
       let query = supabase
         .from("employees")
         .select("*")
@@ -64,19 +72,19 @@ export default function EmployeesList({ activeOrgId, onSelect, title = "Empleado
         (e.full_name ??
           [e.first_name, e.last_name].filter(Boolean).join(" ")) ||
         "Empleado sin nombre";
-      return { ...e, __displayName: displayName };
+      return { ...e, __displayName: displayName as string };
     });
   }, [employees]);
 
-  // Búsqueda + orden en cliente (por si hay full_name nulo)
+  // Búsqueda + orden en cliente
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     let rows = withDisplayName.slice().sort((a, b) =>
-      a.__displayName!.localeCompare(b.__displayName!)
+      (a.__displayName as string).localeCompare(b.__displayName as string)
     );
     if (!term) return rows;
     return rows.filter((e) => {
-      const name = e.__displayName ?? "";
+      const name = (e.__displayName as string) ?? "";
       return (
         name.toLowerCase().includes(term) ||
         (e.email?.toLowerCase().includes(term) ?? false) ||
@@ -113,6 +121,8 @@ export default function EmployeesList({ activeOrgId, onSelect, title = "Empleado
           {filtered.map((e) => {
             const displayName = (e as any).__displayName as string;
             const secondary = e.job_title ?? e.position ?? "—";
+            const href = linkBuilder?.(e) ?? null;
+
             return (
               <li
                 key={e.id}
@@ -125,9 +135,20 @@ export default function EmployeesList({ activeOrgId, onSelect, title = "Empleado
                     <p className="text-xs text-gray-500">{secondary}</p>
                     {e.email ? <p className="text-xs text-gray-400">{e.email}</p> : null}
                   </div>
-                  <span className="text-xs text-blue-600 opacity-0 transition group-hover:opacity-100">
-                    Ver nómina →
-                  </span>
+
+                  {href ? (
+                    <Link
+                      href={href}
+                      className="text-xs text-blue-600 hover:underline"
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
+                      Ver nómina →
+                    </Link>
+                  ) : (
+                    <span className="text-xs text-blue-600 opacity-0 transition group-hover:opacity-100">
+                      Ver nómina →
+                    </span>
+                  )}
                 </div>
               </li>
             );
