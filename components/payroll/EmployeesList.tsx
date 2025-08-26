@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
-type Employee = {
+export type Employee = {
   id: string;
-  // Campos defensivos: usamos alternativas por si el esquema difiere.
+  // Campos tolerantes a diferentes esquemas
   full_name?: string | null;
   name?: string | null;
   first_name?: string | null;
@@ -13,17 +13,13 @@ type Employee = {
   email?: string | null;
   position?: string | null;
   department?: string | null;
-  // multi-tenant (puede llamarse org_id u organization_id)
   org_id?: string | null;
   organization_id?: string | null;
 };
 
 type Props = {
-  /** Opcional: forzar filtro por organización activa si la manejas en UI/cookie */
   activeOrgId?: string;
-  /** Callback al seleccionar empleado (p.ej. abrir su nómina) */
   onSelect?: (employee: Employee) => void;
-  /** Mostrar cabecera */
   title?: string;
 };
 
@@ -39,16 +35,13 @@ export default function EmployeesList({ activeOrgId, onSelect, title = "Empleado
       setErrorMsg(null);
       const supabase = supabaseBrowser();
 
-      // Base: confiamos en RLS. Si tienes activeOrgId, aplicamos filtro extra.
       let query = supabase
         .from("employees")
-        // Traemos todo para ser tolerantes con nombres de columnas
         .select("*")
         .order("full_name", { ascending: true })
         .order("name", { ascending: true });
 
       if (activeOrgId) {
-        // Soporta dos posibles columnas multi-tenant
         query = query.or(`org_id.eq.${activeOrgId},organization_id.eq.${activeOrgId}`);
       }
 
