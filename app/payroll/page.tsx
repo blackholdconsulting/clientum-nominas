@@ -1,138 +1,121 @@
-'use client';
+// app/payroll/page.tsx
+import Link from "next/link";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
-import Link from 'next/link';
-import {useMemo, useState} from 'react';
+function esMonthName(m: number) {
+  const months = [
+    "enero","febrero","marzo","abril","mayo","junio",
+    "julio","agosto","septiembre","octubre","noviembre","diciembre",
+  ];
+  return months[m - 1];
+}
 
-const MONTHS = [
-  { num: 1,  name: 'Enero' },
-  { num: 2,  name: 'Febrero' },
-  { num: 3,  name: 'Marzo' },
-  { num: 4,  name: 'Abril' },
-  { num: 5,  name: 'Mayo' },
-  { num: 6,  name: 'Junio' },
-  { num: 7,  name: 'Julio' },
-  { num: 8,  name: 'Agosto' },
-  { num: 9,  name: 'Septiembre' },
-  { num: 10, name: 'Octubre' },
-  { num: 11, name: 'Noviembre' },
-  { num: 12, name: 'Diciembre' },
-];
+export default async function PayrollHome({
+  searchParams,
+}: {
+  searchParams: { year?: string };
+}) {
+  const cookieStore = cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: () => cookieStore }
+  );
 
-export default function PayrollHomePage() {
-  const currentYear = useMemo(() => new Date().getFullYear(), []);
-  const [year, setYear] = useState<number>(currentYear);
+  // Año seleccionado (por defecto, el actual)
+  const now = new Date();
+  const selectedYear =
+    Number(searchParams?.year ?? now.getFullYear());
 
-  // (Opcional) formato de dinero para pintar KPIs de manera homogénea.
-  const fmt = new Intl.NumberFormat('es-ES', {
-    style: 'currency',
-    currency: 'EUR',
-    minimumFractionDigits: 2,
-  });
+  // (Opcional) puedes calcular métricas reales si quieres
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id")
+    .single();
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-8">
-      {/* Header */}
-      <header className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto max-w-7xl px-6 py-10">
+      <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Gestión de Nóminas</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Administra, genera y revisa las nóminas por período y por empleado.
+          <h1 className="text-2xl font-semibold text-gray-900">
+            Gestión de nóminas
+          </h1>
+          <p className="mt-1 text-sm text-gray-600">
+            Administra, genera y revisa las nóminas por periodo.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <label htmlFor="year" className="text-sm text-gray-600">Año</label>
-          <select
-            id="year"
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
-            value={year}
-            onChange={(e) => setYear(parseInt(e.target.value, 10))}
-          >
-            {Array.from({ length: 7 }, (_, i) => currentYear - 3 + i).map(y => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
+        {/* Selector simple del año (si quieres hacerlo interactivo, usa client component) */}
+        <div className="text-right">
+          <div className="text-sm text-gray-600">Año</div>
+          <div className="text-lg font-medium">
+            {selectedYear}
+          </div>
         </div>
-      </header>
+      </div>
 
-      {/* KPIs (placeholder, conecta tus datos reales cuando los tengas) */}
-      <section className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <KpiCard title="Bruto acumulado" value={fmt.format(0)} />
-        <KpiCard title="Neto acumulado" value={fmt.format(0)} />
-        <KpiCard title="Nóminas finalizadas" value="0/12" />
-      </section>
+      {/* Tarjetas resumen (simples) */}
+      <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="rounded-xl border bg-white p-5 shadow-sm">
+          <div className="text-sm text-gray-600">Bruto acumulado</div>
+          <div className="mt-1 text-2xl font-semibold">0,00 €</div>
+        </div>
+        <div className="rounded-xl border bg-white p-5 shadow-sm">
+          <div className="text-sm text-gray-600">Neto acumulado</div>
+          <div className="mt-1 text-2xl font-semibold">0,00 €</div>
+        </div>
+        <div className="rounded-xl border bg-white p-5 shadow-sm">
+          <div className="text-sm text-gray-600">Nóminas finalizadas</div>
+          <div className="mt-1 text-2xl font-semibold">0 / 12</div>
+        </div>
+      </div>
 
-      {/* Cards por mes */}
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {MONTHS.map((m) => {
-          const link = `/payroll/editor?year=${year}&month=${m.num}`;
-          return (
-            <article
-              key={m.num}
-              className="group rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md"
-            >
-              <div className="mb-4 flex items-start justify-between">
-                <div>
-                  <h2 className="text-base font-medium text-gray-900">{m.name}</h2>
-                  <p className="text-xs text-gray-500">
-                    Periodo {String(m.num).padStart(2,'0')}/{year}
-                  </p>
+      {/* Cuadrícula de meses */}
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+          <div
+            key={month}
+            className="rounded-xl border bg-white p-5 shadow-sm"
+          >
+            <div className="flex items-baseline justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-wider text-gray-500">
+                  Mes
                 </div>
-                <span className="rounded-md bg-gray-50 px-2 py-1 text-xs text-gray-500">
-                  Sin nómina
-                </span>
-              </div>
-
-              {/* Aquí podrías mostrar KPIs por mes (bruto/neto) si ya los calculas */}
-              <div className="mb-5 grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-lg bg-gray-50 p-3">
-                  <p className="text-[11px] uppercase tracking-wide text-gray-500">Bruto</p>
-                  <p className="font-medium text-gray-900">{fmt.format(0)}</p>
-                </div>
-                <div className="rounded-lg bg-gray-50 p-3">
-                  <p className="text-[11px] uppercase tracking-wide text-gray-500">Neto</p>
-                  <p className="font-medium text-gray-900">{fmt.format(0)}</p>
+                <div className="text-lg font-semibold">
+                  {esMonthName(month)} {selectedYear}
                 </div>
               </div>
 
-              {/* Botón: abre /payroll/editor SIEMPRE en nueva pestaña */}
-              <div className="mt-auto">
-                <Link
-                  href={link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  prefetch={false}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  {/* ícono simple (no dependemos de librerías) */}
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    className="opacity-90"
-                  >
-                    <path d="M14 3h7v7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M10 14L21 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M21 14v6a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1v-14a1 1 0 0 1 1-1h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                  Editar nómina
-                </Link>
+              {/* Totales del mes (placeholders) */}
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Bruto</div>
+                <div className="text-sm font-medium">0,00 €</div>
               </div>
-            </article>
-          );
-        })}
-      </section>
-    </main>
-  );
-}
+            </div>
 
-/** --- Componentes UI pequeños --- */
-function KpiCard({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <p className="text-xs uppercase tracking-wide text-gray-500">{title}</p>
-      <p className="mt-2 text-xl font-semibold text-gray-900">{value}</p>
+            <div className="mt-4 text-sm text-gray-500">
+              Sin nómina
+            </div>
+
+            <div className="mt-4">
+              {/* IMPORTANTE: abre /payroll/editor en una pestaña nueva */}
+              <Link
+                href={{
+                  pathname: "/payroll/editor",
+                  query: { year: selectedYear, month },
+                }}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none"
+              >
+                Editar nómina
+              </Link>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
