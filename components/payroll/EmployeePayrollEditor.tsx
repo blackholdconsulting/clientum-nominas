@@ -23,7 +23,6 @@ type Employee = {
   email?: string | null;
   position?: string | null;
   job_title?: string | null;
-  // % por defecto del empleado (puedes tenerlos en tu tabla, según tus capturas)
   irpf_pct?: number | null;
   ss_emp_pct?: number | null;
 };
@@ -32,11 +31,11 @@ type Item = {
   id: string;
   payroll_id: string;
   employee_id: string;
-  type: "earning" | "deduction" | string | null; // devengo/deducción
+  type: "earning" | "deduction" | string | null;
   concept?: string | null;
   description?: string | null;
   quantity?: number | null;
-  amount?: number | null; // importe total de la línea
+  amount?: number | null;
   cotizable?: boolean | null;
   sujeto_irpf?: boolean | null;
   category?: "salarial" | "no_salarial" | null;
@@ -148,16 +147,14 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
     const totalDevengos = earnings.reduce((acc, it) => acc + num(it.amount), 0);
     const totalDeduccionesManuales = deductions.reduce((acc, it) => acc + num(it.amount), 0);
 
-    // Bases
     const baseCotizacion = items
-      .filter((i) => i.cotizable ?? true) // por defecto true
+      .filter((i) => i.cotizable ?? true)
       .reduce((acc, it) => acc + num(it.amount), 0);
 
     const baseIRPF = items
-      .filter((i) => i.sujeto_irpf ?? true) // por defecto true
+      .filter((i) => i.sujeto_irpf ?? true)
       .reduce((acc, it) => acc + num(it.amount), 0);
 
-    // %: prioriza override del periodo; si no, usa el % por defecto del empleado
     const pctIRPF = num(period?.irpf_pct ?? employee?.irpf_pct, 0);
     const pctSSTrab = num(period?.ss_emp_pct ?? employee?.ss_emp_pct, 0);
 
@@ -192,7 +189,7 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
         type: kind,
         concept: kind === "earning" ? "Devengo" : "Deducción",
         amount: 0,
-        cotizable: kind === "earning", // por defecto, devengo cotiza
+        cotizable: kind === "earning",
         sujeto_irpf: true,
         category: "salarial",
       })
@@ -267,9 +264,10 @@ export default function EmployeePayrollEditor({ year, month, employeeId, activeO
     );
   }
 
+  // 👇 FIX: paréntesis para no mezclar ?? con ||
   const employeeName =
-    employee?.full_name ??
-    [employee?.first_name, employee?.last_name].filter(Boolean).join(" ") ||
+    (employee?.full_name ??
+      [employee?.first_name, employee?.last_name].filter(Boolean).join(" ")) ||
     "Empleado";
 
   return (
