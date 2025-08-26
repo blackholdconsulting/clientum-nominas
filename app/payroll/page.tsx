@@ -50,72 +50,80 @@ export default async function PayrollPage({ searchParams }: PageProps) {
 
   const supabase = supabaseServer();
 
-  // Cargar nóminas del año seleccionado (RLS aplicado por Supabase)
+  // Nóminas del año (RLS aplicado por Supabase)
   const { data: payrollRows } = await supabase
     .from("payrolls")
     .select("id, year, month, status")
     .eq("year", selectedYear);
 
-  // Mapa mes -> { exists, status, id }
   const byMonth = new Map<number, { id: string; status: string | null }>();
   for (const row of payrollRows ?? []) {
-    if (!byMonth.has(row.month)) {
-      byMonth.set(row.month, { id: row.id, status: row.status ?? "draft" });
-    }
+    if (!byMonth.has(row.month)) byMonth.set(row.month, { id: row.id, status: row.status ?? "draft" });
   }
 
   return (
     <div className="flex h-[calc(100vh-0px)]">
-      {/* LISTA IZQUIERDA */}
-      <div className="w-full max-w-[860px] flex-1 border-r bg-white">
-        <div className="flex items-center justify-between px-4 py-4">
+      {/* LISTA */}
+      <div className="w-full max-w-[880px] flex-1 border-r bg-white">
+        {/* Header profesional */}
+        <div className="flex items-center justify-between px-6 pt-6">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold">Nóminas {selectedYear}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Nóminas {selectedYear}</h1>
             <span className="text-xs text-gray-500">Multi-tenant (RLS activo)</span>
           </div>
+          {/* Botón global “Crear nómina” con selector de mes/año */}
           <CreatePeriodButton defaultYear={selectedYear} />
         </div>
 
-        <div className="px-4 pb-6">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="px-6 pb-8 pt-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 12 }).map((_, idx) => {
               const month = idx + 1;
+              const mm = String(month).padStart(2, "0");
               const rec = byMonth.get(month) || null;
               const exists = !!rec;
               const status = rec?.status ?? null;
-              const mm = String(month).padStart(2, "0");
               const openHref = `/payroll?year=${selectedYear}&month=${month}`;
 
               return (
                 <div
                   key={month}
-                  className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                  className="rounded-2xl border border-gray-200 bg-white/80 p-4 shadow-sm transition hover:shadow-md"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-start justify-between">
                     <div>
-                      <div className="text-sm font-semibold text-gray-800">
+                      <div className="text-[13px] font-semibold text-gray-900">
                         {mm} · {MONTHS[idx]}
                       </div>
-                      {exists ? (
-                        <span className={badgeClass(status)}>{badgeLabel(status)}</span>
-                      ) : (
-                        <span className="text-[11px] text-gray-500">Sin nómina</span>
-                      )}
+                      <div className="mt-1 text-xs text-gray-500">
+                        {exists ? (
+                          <span className={badgeClass(status)}>{badgeLabel(status)}</span>
+                        ) : (
+                          "Sin nómina"
+                        )}
+                      </div>
                     </div>
+                    <div className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1 text-[11px] text-gray-600">
+                      {mm}/{selectedYear}
+                    </div>
+                  </div>
 
-                    <div className="flex items-center gap-2">
-                      {exists ? (
-                        <Link
-                          href={openHref}
-                          className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-                          title="Abrir editor en panel"
-                        >
-                          Ver nómina
-                        </Link>
-                      ) : (
-                        <CreateMonthInlineButton year={selectedYear} month={month} />
-                      )}
-                    </div>
+                  <p className="mt-3 text-[13px] leading-5 text-gray-600">
+                    Prepara, revisa y guarda las nóminas de tu equipo para este mes.
+                  </p>
+
+                  <div className="mt-4 flex items-center gap-2">
+                    {exists ? (
+                      <Link
+                        href={openHref}
+                        className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50"
+                        title="Abrir editor en panel"
+                      >
+                        Editar nómina
+                      </Link>
+                    ) : (
+                      <CreateMonthInlineButton year={selectedYear} month={month} />
+                    )}
                   </div>
                 </div>
               );
@@ -124,10 +132,10 @@ export default async function PayrollPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* PANEL LATERAL CON IFRAME DEL EDITOR */}
+      {/* PANEL LATERAL (iframe con /payroll/editor) */}
       <div
         className={`relative h-full w-[0px] overflow-hidden transition-all duration-200 ${
-          openMonth ? "w-[min(900px,50vw)] border-l" : ""
+          openMonth ? "w-[min(920px,52vw)] border-l" : ""
         }`}
       >
         {openMonth ? (
