@@ -1,15 +1,20 @@
 import React from "react";
-import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
 
 export type ReceiptData = {
   company: { name: string; cif: string; address?: string; ccc?: string };
   employee: { name: string; nif?: string; ssn?: string; job_title?: string; iban?: string };
   period: { year: number; month: number; days?: number | null };
-  items: Array<{ concept: string; amount: number; type: "earning" | "deduction" }>;
+  items: Array<{ concept: string; amount: number; type: "earning" | "deduction" | string }>;
   bases: { cotizacion: number; irpf: number };
   contribEmployee: { ss: number; pctSS: number; irpf: number; pctIRPF: number; total: number };
   contribEmployer: { ss: number; pctSS: number };
   totals: { devengos: number; deducciones: number; neto: number };
+  erBreakdown?: Array<{ label: string; pct: number; amount: number }>; // desglose empresa
+  signatures?: {
+    employer?: { name?: string; at?: string; imageUrl?: string | null };
+    employee?: { name?: string; at?: string; imageUrl?: string | null };
+  };
 };
 
 const styles = StyleSheet.create({
@@ -23,15 +28,23 @@ const styles = StyleSheet.create({
   th: { flex: 1, padding: 6, backgroundColor: "#f4f6f8", borderRight: 1, borderColor: "#ddd", fontWeight: 700 },
   td: { flex: 1, padding: 6, borderTop: 1, borderRight: 1, borderColor: "#eee" },
   tdRight: { textAlign: "right" },
-  signature: { marginTop: 18, flexDirection: "row", justifyContent: "space-between" },
+  signatureWrap: { marginTop: 18, flexDirection: "row", justifyContent: "space-between", gap: 18 },
+  signatureBox: { width: "48%" },
+  signLine: { marginTop: 6, borderTop: 1, borderColor: "#aaa", height: 0 },
   small: { fontSize: 9, color: "#555" },
 });
 
+function toEur(n: number) {
+  return (n ?? 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" });
+}
+function pct(n: number) {
+  return `${(n ?? 0).toFixed(2)}%`;
+}
+
 export default function ReceiptPDF(d: ReceiptData) {
   const month = String(d.period.month).padStart(2, "0");
-
-  const earnings = d.items.filter((i) => i.type === "earning");
-  const deductions = d.items.filter((i) => i.type === "deduction");
+  const earnings = d.items.filter((i) => (i.type ?? "earning") === "earning");
+  const deductions = d.items.filter((i) => (i.type ?? "").toString() === "deduction");
 
   return (
     <Document>
@@ -97,7 +110,6 @@ export default function ReceiptPDF(d: ReceiptData) {
             <Text style={[styles.th, { flex: 3 }]}>Deducciones</Text>
             <Text style={[styles.th, styles.tdRight]}>Importe</Text>
           </View>
-          {/* SS + IRPF automáticos */}
           <View style={styles.tr}>
             <Text style={[styles.td, { flex: 3 }]}>
               Seguridad Social Trabajador ({pct(d.contribEmployee.pctSS)})
@@ -108,7 +120,6 @@ export default function ReceiptPDF(d: ReceiptData) {
             <Text style={[styles.td, { flex: 3 }]}>IRPF ({pct(d.contribEmployee.pctIRPF)})</Text>
             <Text style={[styles.td, styles.tdRight]}>{toEur(d.contribEmployee.irpf)}</Text>
           </View>
-          {/* Manuales */}
           {deductions.map((e, i) => (
             <View style={styles.tr} key={`d-${i}`}>
               <Text style={[styles.td, { flex: 3 }]}>{e.concept}</Text>
@@ -121,35 +132,66 @@ export default function ReceiptPDF(d: ReceiptData) {
           </View>
         </View>
 
-        {/* Resumen Neto y costes empresa */}
+        {/* Resumen Neto */}
         <View style={[styles.box, { marginTop: 10 }]}>
           <Text style={styles.h2}>Resumen</Text>
           <Text>Devengos: {toEur(d.totals.devengos)} · Deducciones: {toEur(d.totals.deducciones)}</Text>
           <Text style={{ fontSize: 12, fontWeight: 700 }}>Neto a percibir: {toEur(d.totals.neto)}</Text>
-          <Text style={{ marginTop: 6 }}>
-            Aportación empresa (SS empresa {pct(d.contribEmployer.pctSS)}): {toEur(d.contribEmployer.ss)} — (informativo)
+        </View>
+
+        {/* Aportación empresa */}
+        <View style={[styles.box, { marginTop: 6 }]}>
+          <Text style={styles.h2}>Aportación empresa</Text>
+          <Text>Total SS empresa ({pct(d.contribEmployer.pctSS)}): {toEur(d.contribEmployer.ss)}</Text>
+          {d.erBreakdown && d.erBreakdown.length > 0 ? (
+            <View style={[styles.table, { marginTop: 6 }]}>
+              <View style={styles.tr}>
+                <Text style={[styles.th, { flex: 3 }]}>Concepto</Text>
+                <Text style={[styles.th]}>%</Text>
+                <Text style={[styles.th, styles.tdRight]}>Importe</Text>
+              </View>
+              {d.erBreakdown.map((b, i) => (
+                <View style={styles.tr} key={`er-${i}`}>
+                  <Text style={[styles.td, { flex: 3 }]}>{b.label}</Text>
+                  <Text style={[styles.td]}>{pct(b.pct)}</Text>
+                  <Text style={[styles.td, styles.tdRight]}>{toEur(b.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <Text style={[styles.small, { marginTop: 6 }]}>
+            * Tipos pueden variar según CNAE, tramo de cotización y contrato. Revise su convenio y
+            las tablas vigentes de la TGSS.
           </Text>
         </View>
 
         {/* Firmas */}
-        <View style={styles.signature}>
-          <View>
-            <Text>Recibí: el/la trabajador/a</Text>
-            <Text style={{ marginTop: 40 }}>Firma: ___________________________</Text>
-          </View>
-          <View>
+        <View style={styles.signatureWrap}>
+          <View style={styles.signatureBox}>
             <Text>La empresa</Text>
-            <Text style={{ marginTop: 40 }}>Firma y sello: ____________________</Text>
+            {d.signatures?.employer?.imageUrl ? (
+              <Image src={d.signatures.employer.imageUrl} style={{ width: 180, height: 60, marginTop: 8 }} />
+            ) : null}
+            <View style={styles.signLine} />
+            <Text>{d.signatures?.employer?.name ?? "Firma y sello"}</Text>
+            {d.signatures?.employer?.at ? (
+              <Text style={styles.small}>Firmado: {d.signatures.employer.at}</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.signatureBox}>
+            <Text>Recibí: el/la trabajador/a</Text>
+            {d.signatures?.employee?.imageUrl ? (
+              <Image src={d.signatures.employee.imageUrl} style={{ width: 180, height: 60, marginTop: 8 }} />
+            ) : null}
+            <View style={styles.signLine} />
+            <Text>{d.signatures?.employee?.name ?? "Firma"}</Text>
+            {d.signatures?.employee?.at ? (
+              <Text style={styles.small}>Firmado: {d.signatures.employee.at}</Text>
+            ) : null}
           </View>
         </View>
       </Page>
     </Document>
   );
-}
-
-function toEur(n: number) {
-  return (n ?? 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" });
-}
-function pct(n: number) {
-  return `${(n ?? 0).toFixed(2)}%`;
 }
