@@ -1,73 +1,97 @@
-"use client";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import EmployeesList from "@/components/payroll/EmployeesList";
+import Link from "next/link";
 
-import { useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import EmployeesList, { Employee } from "@/components/payroll/EmployeesList";
-import EmployeePayrollEditor from "@/components/payroll/EmployeePayrollEditor";
+type PageProps = {
+  searchParams?: { year?: string; month?: string; employee?: string };
+};
 
-/**
- * URL esperada: /payroll/editor?year=YYYY&month=MM[&employee=EMP_ID][&org=ORG_ID]
- */
-export default function EditorPage({
-  searchParams,
-}: {
-  searchParams?: { year?: string; month?: string; employee?: string; org?: string };
-}) {
-  const params = useSearchParams();
-  const router = useRouter();
+function supabaseServer() {
+  const cookieStore = cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get: (name: string) => cookieStore.get(name)?.value,
+        set: () => {},
+        remove: () => {},
+      },
+    }
+  );
+}
 
-  const year = useMemo(() => Number(params.get("year") ?? searchParams?.year ?? NaN), [params, searchParams]);
-  const month = useMemo(() => Number(params.get("month") ?? searchParams?.month ?? NaN), [params, searchParams]);
-  const employeeId = useMemo(() => params.get("employee") ?? searchParams?.employee ?? null, [params, searchParams]);
-  const activeOrgId = useMemo(() => params.get("org") ?? searchParams?.org ?? undefined, [params, searchParams]);
+export default async function PayrollEditorPage({ searchParams }: PageProps) {
+  const year = Number(searchParams?.year ?? 0);
+  const month = Number(searchParams?.month ?? 0);
 
-  const validPeriod = Number.isFinite(year) && Number.isFinite(month) && year > 1900 && month >= 1 && month <= 12;
+  const supabase = supabaseServer();
 
-  // Click en la tarjeta completa (UX rápida dentro del panel)
-  const handleSelectEmployee = (e: Employee) => {
-    const q = new URLSearchParams(params.toString());
-    q.set("employee", e.id);
-    router.replace(`/payroll/editor?${q.toString()}`);
-  };
-
-  // Enlace "Ver nómina →" (anchor que conserva todos los query params y solo cambia employee)
-  const buildHref = (e: Employee) => {
-    const q = new URLSearchParams(params.toString());
-    q.set("employee", e.id);
-    return `/payroll/editor?${q.toString()}`;
-  };
-
-  if (!validPeriod) {
-    return (
-      <div className="flex h-[100dvh] items-center justify-center">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-6 py-4 text-sm text-amber-800">
-          Falta indicar <span className="font-semibold">year</span> y <span className="font-semibold">month</span> en la URL.
-          <div className="mt-1 text-xs text-amber-700">Ejemplo: /payroll/editor?year=2025&month=8</div>
-        </div>
-      </div>
-    );
-  }
+  // Comprueba si existe el período
+  const { data: period } = await supabase
+    .from("payrolls")
+    .select("id, year, month, status, ss_er_breakdown")
+    .eq("year", year)
+    .eq("month", month)
+    .limit(1)
+    .maybeSingle();
 
   return (
-    <div className="grid h-[100dvh] grid-cols-12 bg-white">
+    <div className="flex h-full">
       {/* Columna izquierda: Empleados */}
-      <aside className="col-span-4 border-r bg-gray-50">
-        <EmployeesList
-          activeOrgId={activeOrgId}
-          onSelect={handleSelectEmployee}
-          linkBuilder={buildHref}
-          title="Empleados"
-        />
+      <aside className="w-[360px] shrink-0 border-r bg-white">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-800">Empleados</div>
+            <div className="text-xs text-gray-500">Multi-tenant (RLS)</div>
+          </div>
+          {period ? (
+            <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
+              {String(month).padStart(2, "0")}/{year}
+            </span>
+          ) : null}
+        </div>
+        <EmployeesList year={year} month={month} />
       </aside>
 
-      {/* Columna derecha: Editor de nómina */}
-      <main className="col-span-8">
-        <EmployeePayrollEditor
-          year={year}
-          month={month}
-          employeeId={employeeId}
-          activeOrgId={activeOrgId}
-        />
+      {/* Columna derecha: contenido */}
+      <main className="flex flex-1 items-center justify-center bg-gray-50">
+        {period ? (
+          <div className="text-center">
+            <p className="text-sm text-gray-600">Selecciona un empleado a la izquierda para editar su nómina.</p>
+          </div>
+        ) : (
+          <div className="text-center">
+            <p className="text-sm text-gray-600">No existe período <b>{month}/{year}</b>.</p>
+            <p className="mt-1 text-xs text-gray-500">Genera el período antes de editar nóminas.</p>
+            <button
+              onClick={async () => {
+                const res = await fetch("/api/payroll/create", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "same-origin",
+                  cache: "no-store",
+                  body: JSON.stringify({ year, month }),
+                });
+                const json = await res.json();
+                if (res.ok && json.ok) location.reload();
+                else alert(json.error ?? "No se ha podido crear el período.");
+              }}
+              className="mt-3 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50"
+            >
+              Crear período {String(month).padStart(2, "0")}/{year}
+            </button>
+            <div className="mt-3">
+              <Link
+                href="/payroll"
+                className="text-xs text-gray-500 underline hover:text-gray-700"
+              >
+                Volver a Nóminas
+              </Link>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
