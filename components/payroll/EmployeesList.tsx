@@ -1,160 +1,110 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
-export type Employee = {
+type Props = { year: number; month: number };
+
+type Employee = {
   id: string;
-  full_name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
+  full_name?: string | null;
   email?: string | null;
   position?: string | null;
-  job_title?: string | null;
-  // multi-tenant (si aplica)
-  org_id?: string | null;
-  organization_id?: string | null;
 };
 
-type Props = {
-  activeOrgId?: string;
-  onSelect?: (employee: Employee) => void;
-  title?: string;
-  /** Si se pasa, se mostrará un enlace "Ver nómina →" que navega a la URL devuelta */
-  linkBuilder?: (employee: Employee) => string | null;
-};
-
-export default function EmployeesList({
-  activeOrgId,
-  onSelect,
-  title = "Empleados",
-  linkBuilder,
-}: Props) {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [q, setQ] = useState("");
+export default function EmployeesList({ year, month }: Props) {
+  const supabase = useMemo(() => supabaseBrowser(), []);
+  const [list, setList] = useState<Employee[]>([]);
+  const [term, setTerm] = useState("");
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchEmployees = async () => {
+    let alive = true;
+    (async () => {
       setLoading(true);
-      setErrorMsg(null);
-      const supabase = supabaseBrowser();
+      setErr(null);
 
-      // Ordenamos solo por columnas existentes
-      let query = supabase
+      // Solo seleccionamos columnas reales (no usamos "name")
+      const { data, error } = await supabase
         .from("employees")
-        .select("*")
-        .order("full_name", { ascending: true, nullsFirst: true });
+        .select("id, first_name, last_name, full_name, email, position")
+        .order("first_name", { ascending: true });
 
-      if (activeOrgId) {
-        query = query.or(`org_id.eq.${activeOrgId},organization_id.eq.${activeOrgId}`);
-      }
-
-      const { data, error } = await query;
+      if (!alive) return;
       if (error) {
-        setErrorMsg(error.message);
-        setEmployees([]);
+        setErr(error.message);
       } else {
-        setEmployees((data ?? []) as Employee[]);
+        setList((data ?? []) as Employee[]);
       }
       setLoading(false);
-    };
+    })();
 
-    fetchEmployees();
-  }, [activeOrgId]);
+    return () => { alive = false; };
+  }, [supabase]);
 
-  // Nombre calculado (full_name -> first+last)
-  const withDisplayName = useMemo(() => {
-    return employees.map((e) => {
-      const displayName =
-        (e.full_name ??
-          [e.first_name, e.last_name].filter(Boolean).join(" ")) ||
-        "Empleado sin nombre";
-      return { ...e, __displayName: displayName as string };
-    });
-  }, [employees]);
-
-  // Búsqueda + orden en cliente
   const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    let rows = withDisplayName.slice().sort((a, b) =>
-      (a.__displayName as string).localeCompare(b.__displayName as string)
-    );
-    if (!term) return rows;
-    return rows.filter((e) => {
-      const name = (e.__displayName as string) ?? "";
-      return (
-        name.toLowerCase().includes(term) ||
-        (e.email?.toLowerCase().includes(term) ?? false) ||
-        (e.position?.toLowerCase().includes(term) ?? false) ||
-        (e.job_title?.toLowerCase().includes(term) ?? false)
-      );
+    const t = term.trim().toLowerCase();
+    if (!t) return list;
+    return list.filter((e) => {
+      const safeFull =
+        (e.full_name !== null && e.full_name !== undefined ? e.full_name : "") as string;
+      const safeName =
+        safeFull && safeFull.length > 0
+          ? safeFull
+          : [e.first_name ?? "", e.last_name ?? ""].filter(Boolean).join(" ");
+      const email = (e.email ?? "") as string;
+      const pos = (e.position ?? "") as string;
+      const haystack = `${safeName} ${email} ${pos}`.toLowerCase();
+      return haystack.includes(t);
     });
-  }, [q, withDisplayName]);
+  }, [list, term]);
 
   return (
     <div className="flex h-full flex-col">
-      <div className="px-4 pt-4">
-        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
-        <div className="mt-2">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar por nombre, email, puesto…"
-            className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
-          />
-        </div>
+      <div className="p-3">
+        <input
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          placeholder="Buscar por nombre, email, puesto…"
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+        />
       </div>
 
       {loading ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-gray-500">
-          Cargando empleados…
-        </div>
-      ) : errorMsg ? (
-        <div className="p-4 text-sm text-red-600">Error: {errorMsg}</div>
+        <div className="px-3 pb-3 text-xs text-gray-500">Cargando empleados…</div>
+      ) : err ? (
+        <div className="px-3 pb-3 text-xs text-red-600">Error: {err}</div>
       ) : filtered.length === 0 ? (
-        <div className="p-4 text-sm text-gray-500">No hay empleados</div>
-      ) : (
-        <ul className="mt-2 flex-1 overflow-auto px-2 pb-2">
-          {filtered.map((e) => {
-            const displayName = (e as any).__displayName as string;
-            const secondary = e.job_title ?? e.position ?? "—";
-            const href = linkBuilder?.(e) ?? null;
+        <div className="px-3 pb-3 text-xs text-gray-500">Sin resultados.</div>
+      ) : null}
 
-            return (
-              <li
-                key={e.id}
-                className="group mb-2 cursor-pointer rounded-xl border border-gray-100 bg-white px-3 py-2 shadow-sm hover:border-blue-400 hover:shadow"
-                onClick={() => onSelect?.(e)}
+      <ul className="flex-1 divide-y overflow-auto">
+        {filtered.map((e) => {
+          const composed =
+            (e.full_name && e.full_name.length > 0
+              ? e.full_name
+              : [e.first_name ?? "", e.last_name ?? ""].filter(Boolean).join(" ")) || "Empleado";
+          return (
+            <li key={e.id}>
+              <a
+                href={`/payroll/editor?year=${year}&month=${month}&employee=${e.id}`}
+                className="block px-3 py-3 hover:bg-gray-50"
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{displayName}</p>
-                    <p className="text-xs text-gray-500">{secondary}</p>
-                    {e.email ? <p className="text-xs text-gray-400">{e.email}</p> : null}
+                    <div className="text-sm font-medium text-gray-800">{composed}</div>
+                    <p className="text-xs text-gray-500">{e.email ?? "—"}{e.position ? ` · ${e.position}` : ""}</p>
                   </div>
-
-                  {href ? (
-                    <Link
-                      href={href}
-                      className="text-xs text-blue-600 hover:underline"
-                      onClick={(ev) => ev.stopPropagation()}
-                    >
-                      Ver nómina →
-                    </Link>
-                  ) : (
-                    <span className="text-xs text-blue-600 opacity-0 transition group-hover:opacity-100">
-                      Ver nómina →
-                    </span>
-                  )}
+                  <span className="text-[11px] text-blue-600">Ver nómina →</span>
                 </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
