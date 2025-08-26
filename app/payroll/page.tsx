@@ -1,128 +1,155 @@
-"use client";
-
-import { useMemo, useState } from "react";
-import PageHeader from "@/components/common/PageHeader";
+import Link from "next/link";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 import CreatePeriodButton from "@/components/payroll/CreatePeriodButton";
+import CreateMonthInlineButton from "@/components/payroll/CreateMonthInlineButton";
 
-type MonthCard = { n: number; label: string };
+type PageProps = {
+  searchParams?: Record<string, string | string[] | undefined>;
+};
 
-export default function PayrollPage() {
-  // Ajusta el año si lo necesitas (en tus capturas es 2025)
-  const YEAR = 2025;
-
-  const months: MonthCard[] = useMemo(
-    () => [
-      { n: 1, label: "Enero" },
-      { n: 2, label: "Febrero" },
-      { n: 3, label: "Marzo" },
-      { n: 4, label: "Abril" },
-      { n: 5, label: "Mayo" },
-      { n: 6, label: "Junio" },
-      { n: 7, label: "Julio" },
-      { n: 8, label: "Agosto" },
-      { n: 9, label: "Septiembre" },
-      { n: 10, label: "Octubre" },
-      { n: 11, label: "Noviembre" },
-      { n: 12, label: "Diciembre" },
-    ],
-    []
+function supabaseServer() {
+  const cookieStore = cookies();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get: (name: string) => cookieStore.get(name)?.value,
+        set: () => {},
+        remove: () => {},
+      },
+    }
   );
+}
 
-  // Panel lateral con el editor (iframe /payroll/editor?year=YYYY&month=MM)
-  const [open, setOpen] = useState(false);
-  const [selMonth, setSelMonth] = useState<number | null>(null);
+const MONTHS = [
+  "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
+];
 
-  const openEditor = (m: number) => {
-    setSelMonth(m);
-    setOpen(true);
+function badgeClass(status?: string | null) {
+  const map: Record<string, string> = {
+    draft: "bg-gray-100 text-gray-700 border-gray-200",
+    closed: "bg-amber-100 text-amber-800 border-amber-200",
+    paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
   };
+  return `inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${map[status ?? "draft"] ?? map.draft}`;
+}
+function badgeLabel(status?: string | null) {
+  const map: Record<string, string> = { draft: "Borrador", closed: "Cerrada", paid: "Pagada" };
+  return map[status ?? "draft"] ?? "Borrador";
+}
 
-  const closeEditor = () => {
-    setOpen(false);
-    // No limpiamos selMonth para mantener el estado si reabres
-  };
+export default async function PayrollPage({ searchParams }: PageProps) {
+  const now = new Date();
+  const selectedYear = Number(
+    typeof searchParams?.year === "string" ? searchParams?.year : now.getFullYear()
+  );
+  const openMonth = Number(typeof searchParams?.month === "string" ? searchParams?.month : 0);
+
+  const supabase = supabaseServer();
+
+  // Cargar nóminas del año seleccionado (RLS aplicado por Supabase)
+  const { data: payrollRows } = await supabase
+    .from("payrolls")
+    .select("id, year, month, status")
+    .eq("year", selectedYear);
+
+  // Mapa mes -> { exists, status, id }
+  const byMonth = new Map<number, { id: string; status: string | null }>();
+  for (const row of payrollRows ?? []) {
+    if (!byMonth.has(row.month)) {
+      byMonth.set(row.month, { id: row.id, status: row.status ?? "draft" });
+    }
+  }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      {/* CABECERA PROFESIONAL + botón volver */}
-      <PageHeader
-        title="Gestión de Nóminas"
-        subtitle="Selecciona un período para preparar las nóminas de tus empleados."
-        backHref="/dashboard"
-      />
-
-      {/* GRID DE MESES */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {months.map((m) => (
-          <div
-            key={m.n}
-            className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md"
-          >
-            <div className="flex items-start justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">{m.label}</h3>
-              <span className="rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
-                {String(m.n).padStart(2, "0")}/{YEAR}
-              </span>
-            </div>
-
-            <p className="mt-2 text-sm leading-6 text-gray-600">
-              Prepara, revisa y guarda las nóminas de tu equipo para este mes.
-            </p>
-
-            <div className="mt-5 flex items-center gap-2">
-              {/* Botón existente: abre el panel lateral con el editor embebido */}
-              <button
-                onClick={() => openEditor(m.n)}
-                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-              >
-                Editar nómina
-              </button>
-
-              {/* NUEVO: crear período (RPC payroll_generate_period) */}
-              <CreatePeriodButton year={YEAR} month={m.n} />
-            </div>
+    <div className="flex h-[calc(100vh-0px)]">
+      {/* LISTA IZQUIERDA */}
+      <div className="w-full max-w-[860px] flex-1 border-r bg-white">
+        <div className="flex items-center justify-between px-4 py-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold">Nóminas {selectedYear}</h1>
+            <span className="text-xs text-gray-500">Multi-tenant (RLS activo)</span>
           </div>
-        ))}
+          <CreatePeriodButton defaultYear={selectedYear} />
+        </div>
+
+        <div className="px-4 pb-6">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 12 }).map((_, idx) => {
+              const month = idx + 1;
+              const rec = byMonth.get(month) || null;
+              const exists = !!rec;
+              const status = rec?.status ?? null;
+              const mm = String(month).padStart(2, "0");
+              const openHref = `/payroll?year=${selectedYear}&month=${month}`;
+
+              return (
+                <div
+                  key={month}
+                  className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-800">
+                        {mm} · {MONTHS[idx]}
+                      </div>
+                      {exists ? (
+                        <span className={badgeClass(status)}>{badgeLabel(status)}</span>
+                      ) : (
+                        <span className="text-[11px] text-gray-500">Sin nómina</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {exists ? (
+                        <Link
+                          href={openHref}
+                          className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                          title="Abrir editor en panel"
+                        >
+                          Ver nómina
+                        </Link>
+                      ) : (
+                        <CreateMonthInlineButton year={selectedYear} month={month} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      {/* PANEL LATERAL (overlay) */}
-      {open && selMonth !== null && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
-            onClick={closeEditor}
-          />
-          <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-5xl overflow-hidden rounded-l-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <div>
-                <h4 className="text-sm font-semibold text-gray-800">
-                  Editor de nómina {String(selMonth).padStart(2, "0")}/{YEAR}
-                </h4>
-                <p className="text-xs text-gray-500">
-                  Trabaja sin salir de esta página.
-                </p>
+      {/* PANEL LATERAL CON IFRAME DEL EDITOR */}
+      <div
+        className={`relative h-full w-[0px] overflow-hidden transition-all duration-200 ${
+          openMonth ? "w-[min(900px,50vw)] border-l" : ""
+        }`}
+      >
+        {openMonth ? (
+          <div className="flex h-full flex-col bg-gray-50">
+            <div className="flex items-center justify-between border-b bg-white px-4 py-3">
+              <div className="text-sm font-medium text-gray-800">
+                Editor — {String(openMonth).padStart(2, "0")}/{selectedYear}
               </div>
-              <button
-                onClick={closeEditor}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                aria-label="Cerrar editor"
-                title="Cerrar"
+              <Link
+                href={`/payroll?year=${selectedYear}`}
+                className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
               >
                 Cerrar
-              </button>
+              </Link>
             </div>
-
-            <div className="h-[calc(100%-56px)]">
-              <iframe
-                key={`${YEAR}-${selMonth}`}
-                title="Payroll Editor"
-                src={`/payroll/editor?year=${YEAR}&month=${selMonth}`}
-                className="h-full w-full"
-              />
-            </div>
-          </aside>
-        </>
-      )}
+            <iframe
+              src={`/payroll/editor?year=${selectedYear}&month=${openMonth}`}
+              className="h-full w-full"
+            />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
