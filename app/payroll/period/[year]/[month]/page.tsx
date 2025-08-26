@@ -1,126 +1,82 @@
 // app/payroll/period/[year]/[month]/page.tsx
-export const runtime = "nodejs";
-
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import Link from "next/link";
 
-type Params = { params: { year: string; month: string } };
+type Params = { year: string; month: string };
+type Search = { create?: string };
 
-function getSupabase() {
+async function createDraft(year: number, month: number) {
+  // Crear el borrador en Supabase llamando a tu RPC/función SQL
   const cookieStore = cookies();
-  return createServerClient(
+  const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get: (name: string) => cookieStore.get(name)?.value,
-        set: (name: string, value: string, options: any) => {
-          cookieStore.set({ name, value, ...options });
-        },
-        remove: (name: string, options: any) => {
-          cookieStore.set({ name, value: "", ...options });
+        get(name: string) {
+          return cookieStore.get(name)?.value;
         },
       },
     }
   );
+
+  // ⚠️ Ajusta el nombre y parámetros del RPC a los tuyos si difieren
+  const { error } = await supabase.rpc("payroll_generate_period", {
+    p_year: year,
+    p_month: month,
+  });
+
+  if (error) {
+    // Si la función ya existe y hace "insert if not exists",
+    // podrías ignorar el error; aquí lo lanzamos para ver el motivo.
+    throw new Error(error.message);
+  }
 }
 
-export default async function PayrollEditorPage({ params }: Params) {
+export default async function PayrollEditorPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams?: Search;
+}) {
   const year = Number(params.year);
   const month = Number(params.month);
-  const supabase = getSupabase();
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  if (!user) {
-    return (
-      <div className="p-8">
-        <h1 className="text-xl font-semibold">Editor de nómina {month}/{year}</h1>
-        <p className="mt-4 text-red-600">Debes iniciar sesión.</p>
-        <Link className="text-blue-600 underline mt-2 inline-block" href="/login">
-          Iniciar sesión
-        </Link>
-      </div>
-    );
+  // Si viene ?create=1, creamos el borrador y volvemos al editor del periodo (URL relativa)
+  if (searchParams?.create === "1") {
+    await createDraft(year, month);
+    redirect(`/payroll/period/${year}/${month}`);
   }
 
-  // ¿Existe la cabecera?
-  const { data: payroll, error: pErr } = await supabase
-    .from("payrolls")
-    .select("id, status, gross_total, net_total")
-    .eq("user_id", user.id)
-    .eq("period_year", year)
-    .eq("period_month", month)
-    .maybeSingle();
-  if (pErr) throw pErr;
-
+  // Render muy sencillo de ejemplo: muestra botón para crear borrador
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <h1 className="text-2xl font-semibold">
-        Editor de nómina {new Date(year, month - 1).toLocaleString("es-ES", { month: "long" })} {year}
+    <main className="max-w-4xl mx-auto px-4 py-10">
+      <h1 className="text-2xl font-semibold mb-4">
+        Editor de nómina {month}/{year}
       </h1>
 
-      {!payroll ? (
-        <div className="mt-6 border border-yellow-300 bg-yellow-50 p-5 rounded">
-          <p className="mb-4">Aún no existe una nómina para este periodo.</p>
-          <form action="/api/payroll/generate" method="POST">
-            <input type="hidden" name="year" value={year} />
-            <input type="hidden" name="month" value={month} />
-            <button
-              type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Crear borrador de nómina
-            </button>
-          </form>
-          <Link href="/payroll" className="mt-4 inline-block text-blue-600 underline">
-            Volver
-          </Link>
-        </div>
-      ) : (
-        <section className="mt-6 space-y-6">
-          {/* Carga y muestra líneas por empleado */}
-          <EditorBody payrollId={payroll.id} year={year} month={month} />
-        </section>
-      )}
-    </div>
-  );
-}
-
-async function EditorBody({ payrollId, year, month }: { payrollId: string; year: number; month: number }) {
-  const supabase = getSupabase();
-
-  // Empleados + líneas
-  const { data: rows, error: rErr } = await supabase
-    .from("payroll_items")
-    .select("employee_id, base_gross, irpf_amount, ss_emp_amount, ss_er_amount, net, employees(full_name)")
-    .eq("payroll_id", payrollId);
-  if (rErr) throw rErr;
-
-  if (!rows?.length) {
-    return <p className="text-gray-600">No hay líneas aún para este periodo.</p>;
-  }
-
-  return (
-    <div className="border rounded p-4">
-      <p className="text-sm text-gray-600 mb-3">
-        Periodo: {month}/{year} — Empleados: {rows.length}
-      </p>
-      <div className="space-y-3">
-        {rows.map((r: any) => (
-          <div key={r.employee_id} className="grid grid-cols-6 gap-3 items-center border-b pb-2">
-            <div className="col-span-2 font-medium">{r.employees?.full_name ?? r.employee_id}</div>
-            <div>Bruto: {Number(r.base_gross).toFixed(2)} €</div>
-            <div>IRPF: {Number(r.irpf_amount).toFixed(2)} €</div>
-            <div>SS Trab.: {Number(r.ss_emp_amount).toFixed(2)} €</div>
-            <div>NETO: {Number(r.net).toFixed(2)} €</div>
-          </div>
-        ))}
+      {/* Si no hay nómina, mostramos el CTA para crearla */}
+      <div className="rounded-md border bg-amber-50 p-4 mb-6">
+        <p className="mb-3">
+          Aún no existe una nómina para este periodo.
+        </p>
+        <Link
+          href={`/payroll/period/${year}/${month}?create=1`}
+          replace
+          className="inline-flex items-center justify-center rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700"
+        >
+          Crear borrador de nómina
+        </Link>
       </div>
-    </div>
+
+      {/* Aquí pondrás el editor de líneas por empleado cuando exista */}
+      <p className="text-sm text-muted-foreground">
+        Cuando exista la nómina, aquí se mostrará el editor por empleado y el
+        histórico del periodo.
+      </p>
+    </main>
   );
 }
