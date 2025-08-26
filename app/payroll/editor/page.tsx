@@ -6,11 +6,7 @@ import EmployeesList, { Employee } from "@/components/payroll/EmployeesList";
 import EmployeePayrollEditor from "@/components/payroll/EmployeePayrollEditor";
 
 /**
- * Editor embebido: dos columnas
- * - Izquierda: empleados del tenant (RLS)
- * - Derecha: editor por empleado y periodo (year/month) a partir de querystring
- *
- * URL esperada: /payroll/editor?year=YYYY&month=MM[&employee=EMP_ID]
+ * URL esperada: /payroll/editor?year=YYYY&month=MM[&employee=EMP_ID][&org=ORG_ID]
  */
 export default function EditorPage({
   searchParams,
@@ -27,11 +23,18 @@ export default function EditorPage({
 
   const validPeriod = Number.isFinite(year) && Number.isFinite(month) && year > 1900 && month >= 1 && month <= 12;
 
+  // Click en la tarjeta completa (UX rápida dentro del panel)
   const handleSelectEmployee = (e: Employee) => {
     const q = new URLSearchParams(params.toString());
     q.set("employee", e.id);
-    // Conserva year, month, org… y solo cambia employee
     router.replace(`/payroll/editor?${q.toString()}`);
+  };
+
+  // Enlace "Ver nómina →" (anchor que conserva todos los query params y solo cambia employee)
+  const buildHref = (e: Employee) => {
+    const q = new URLSearchParams(params.toString());
+    q.set("employee", e.id);
+    return `/payroll/editor?${q.toString()}`;
   };
 
   if (!validPeriod) {
@@ -52,6 +55,7 @@ export default function EditorPage({
         <EmployeesList
           activeOrgId={activeOrgId}
           onSelect={handleSelectEmployee}
+          linkBuilder={buildHref}
           title="Empleados"
         />
       </aside>
