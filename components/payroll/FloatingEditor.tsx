@@ -14,9 +14,10 @@ export default function FloatingEditor() {
   const employee = sp.get("employee") || "";
   const orgId = sp.get("orgId") || "";
 
-  const url = `/payroll/editor?year=${y}&month=${m}${
-    employee ? `&employee=${encodeURIComponent(employee)}` : ""
-  }${orgId ? `&orgId=${encodeURIComponent(orgId)}` : ""}`;
+  const url =
+    `/payroll/editor?year=${y}&month=${m}` +
+    (employee ? `&employee=${encodeURIComponent(employee)}` : "") +
+    (orgId ? `&orgId=${encodeURIComponent(orgId)}` : "");
 
   // Evitar scroll de fondo cuando está abierto
   useEffect(() => {
@@ -41,13 +42,13 @@ export default function FloatingEditor() {
     <div className="fixed inset-0 z-[70]">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
+        className="absolute inset-0 z-[70] bg-black/40 backdrop-blur-[1px]"
         onClick={close}
         aria-hidden
       />
 
-      {/* Sheet derecha */}
-      <div className="absolute right-0 top-0 h-full w-[min(1100px,92vw)] bg-white shadow-2xl ring-1 ring-black/10">
+      {/* Sheet (por encima del backdrop) */}
+      <div className="absolute right-0 top-0 z-[71] h-full w-[min(1100px,92vw)] bg-white shadow-2xl ring-1 ring-black/10">
         {/* Header */}
         <div className="flex h-12 items-center justify-between border-b px-3">
           <div className="flex items-center gap-2">
@@ -75,9 +76,11 @@ export default function FloatingEditor() {
           </div>
         </div>
 
-        {/* Contenido: IFRAME del editor real */}
+        {/* Contenido: IFRAME del editor real
+            key={url} fuerza remontaje cuando cambian mes/empleado/org */}
         <div className="h-[calc(100%-3rem)]">
           <iframe
+            key={url}
             src={url}
             className="h-full w-full border-0"
             referrerPolicy="no-referrer"
