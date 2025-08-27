@@ -1,4 +1,3 @@
-// Forzamos dinámico: no SSR de datos aquí
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -14,12 +13,11 @@ export default function PayrollPage({ searchParams }: PageProps) {
   const now = new Date();
   const year = Number(typeof searchParams?.year === "string" ? searchParams.year : now.getFullYear());
   const monthOpen = Number(typeof searchParams?.month === "string" ? searchParams.month : 0);
+  const orgId = typeof searchParams?.orgId === "string" ? (searchParams!.orgId as string) : undefined;
 
   return (
     <div className="flex h-[calc(100vh-0px)]">
-      {/* Columna principal */}
       <div className="w-full max-w-[980px] flex-1 border-r bg-white">
-        {/* Topbar estilo Clientum */}
         <div className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
           <div className="mx-auto flex max-w-[980px] items-center justify-between gap-3 px-6 py-4">
             <div>
@@ -30,13 +28,11 @@ export default function PayrollPage({ searchParams }: PageProps) {
           </div>
         </div>
 
-        {/* Grid (carga en cliente con RLS) */}
         <div className="mx-auto max-w-[980px] px-6 py-5">
           <PayrollGrid year={year} />
         </div>
       </div>
 
-      {/* Panel lateral (iframe del editor con empleados a la izquierda) */}
       <div
         className={`relative h-full w-[0px] overflow-hidden transition-all duration-200 ${
           monthOpen ? "w-[min(980px,52vw)] border-l" : ""
@@ -48,15 +44,23 @@ export default function PayrollPage({ searchParams }: PageProps) {
               <div className="text-sm font-medium text-gray-800">
                 Editor — {String(monthOpen).padStart(2, "0")}/{year}
               </div>
-              <Link
-                href={`/payroll?year=${year}`}
-                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-              >
-                Cerrar
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/dashboard"
+                  className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                >
+                  Dashboard
+                </Link>
+                <Link
+                  href={`/payroll?year=${year}${orgId ? `&orgId=${orgId}` : ""}`}
+                  className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                >
+                  Cerrar
+                </Link>
+              </div>
             </div>
             <iframe
-              src={`/payroll/editor?year=${year}&month=${monthOpen}`}
+              src={`/payroll/editor?year=${year}&month=${monthOpen}${orgId ? `&orgId=${orgId}` : ""}`}
               className="h-full w-full"
             />
           </div>
