@@ -24,42 +24,46 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const year = Number(body?.year);
     const month = Number(body?.month);
-    const providedOrgId: string | null = body?.orgId ?? null;
+    let orgId: string | null = body?.orgId ?? null;
+
     if (!year || !month || month < 1 || month > 12) {
       return NextResponse.json({ ok: false, error: "Parámetros inválidos (year/month)." }, { status: 400 });
     }
 
     const supabase = supabaseServer();
 
-    // ¿Existe ya?
-    const { data: existing } = await supabase
+    // Idempotencia
+    const { data: existing, error: exErr } = await supabase
       .from("payrolls")
       .select("id")
       .eq("year", year)
       .eq("month", month)
       .limit(1);
+    if (exErr) throw new Error(exErr.message);
     if (existing && existing.length > 0) {
       return NextResponse.json({ ok: true, id: existing[0].id, created: false });
     }
 
-    // org_id (si solo hay una org para el usuario actual)
-    let orgId = providedOrgId;
+    // Resolver org si no viene (1 sola -> auto)
     if (!orgId) {
-      const { data: memberships } = await supabase.from("org_members").select("org_id").limit(2);
-      if ((memberships ?? []).length === 1) orgId = memberships![0].org_id as string;
-      else if (!orgId) {
+      const { data: memberships, error: memErr } = await supabase
+        .from("org_members")
+        .select("org_id")
+        .limit(2);
+      if (memErr) throw new Error(memErr.message);
+      if ((memberships ?? []).length === 1) {
+        orgId = memberships![0].org_id as string;
+      } else {
         return NextResponse.json({ ok: false, error: "Varias organizaciones: proporciona orgId." }, { status: 400 });
       }
     }
 
-    // Inserta con org_id; si no existe la columna, reintenta con organization_id
     let payload: any = { year, month, status: "draft" as const };
-    if (orgId) payload.org_id = orgId;
+    payload.org_id = orgId;
 
     let ins = await supabase.from("payrolls").insert(payload).select("id").single();
     if (ins.error && /column .*org_id.* does not exist/i.test(ins.error.message)) {
-      payload = { year, month, status: "draft" as const };
-      if (orgId) (payload as any).organization_id = orgId;
+      payload = { year, month, status: "draft" as const, organization_id: orgId };
       ins = await supabase.from("payrolls").insert(payload).select("id").single();
     }
     if (ins.error) throw new Error(ins.error.message);
