@@ -38,17 +38,14 @@ export default function EmployeePayrollEditor({
   const [period, setPeriod] = useState<PayrollRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-
   const [pdfLoading, setPdfLoading] = useState(false);
 
-  // Cargar empleado + periodo
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       setErr(null);
 
-      // Empleado
       const { data: emp, error: e1 } = await supabase
         .from("employees")
         .select("id, full_name, first_name, last_name, email, position")
@@ -63,7 +60,6 @@ export default function EmployeePayrollEditor({
       }
       setEmployee(emp as Employee);
 
-      // Periodo (admite year/month o period_year/period_month)
       let per: PayrollRow | null = null;
 
       const q1 = await supabase
@@ -88,7 +84,6 @@ export default function EmployeePayrollEditor({
       setPeriod(per);
       setLoading(false);
     })();
-
     return () => {
       alive = false;
     };
@@ -98,39 +93,19 @@ export default function EmployeePayrollEditor({
     (employee?.full_name ??
       [employee?.first_name, employee?.last_name].filter(Boolean).join(" ")) || "Empleado";
 
-  // Crear el periodo si no existe (mínimo viable)
-  const ensurePeriod = async () => {
-    try {
-      const res = await fetch("/api/payroll/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ year, month, orgId }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        alert(json?.error || "No se pudo crear el período.");
-        return;
-      }
-      setPeriod(json?.period || { id: json?.id, status: "draft" } as any);
-    } catch (e: any) {
-      alert(e?.message || "Error creando período.");
-    }
-  };
-
-  // === GENERAR PDF: llama al endpoint y abre el PDF en una pestaña ===
+  // TEMP: Generar PDF contra la ruta mínima
   const handleGeneratePdf = async () => {
     try {
       setPdfLoading(true);
-      const res = await fetch("/api/payroll/receipt", {
+      const res = await fetch("/api/payroll/receipt-min", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           year,
           month,
-          employeeId,
-          orgId,
-          upload: false, // pon a true si quieres subirlo a Storage
+          employeeName: displayName,
+          status: period?.status ?? "borrador",
+          liquido: 1200,
         }),
       });
       if (!res.ok) {
@@ -139,11 +114,9 @@ export default function EmployeePayrollEditor({
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-
-      // Abrimos el PDF en una pestaña/ventana nueva
-      const win = window.open(url, "_blank");
-      if (!win) {
-        // fallback por si el navegador bloquea popups
+      // Intentar abrir en pestaña nueva
+      const w = window.open(url, "_blank");
+      if (!w) {
         const a = document.createElement("a");
         a.href = url;
         a.target = "_blank";
@@ -174,7 +147,6 @@ export default function EmployeePayrollEditor({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Cabecera */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
           <p className="text-sm font-semibold text-gray-900">{displayName}</p>
@@ -187,61 +159,20 @@ export default function EmployeePayrollEditor({
           <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
             {String(month).padStart(2, "0")}/{year}
           </span>
-          {period ? (
-            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-              {period.status ?? "borrador"}
-            </span>
-          ) : (
-            <button
-              onClick={ensurePeriod}
-              className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:brightness-105"
-            >
-              Crear período
-            </button>
-          )}
+          <button
+            onClick={handleGeneratePdf}
+            disabled={pdfLoading}
+            className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
+          >
+            {pdfLoading ? "Generando..." : "Generar PDF"}
+          </button>
         </div>
       </div>
 
-      {/* Cuerpo del editor (placeholder para tus formularios reales) */}
       <div className="flex-1 overflow-y-auto p-4">
-        {period ? (
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-gray-900">Datos de nómina</h3>
-            <p className="text-sm text-gray-600">
-              Aquí puedes montar los formularios de devengos/deducciones, bases de cotización, IRPF, etc.
-            </p>
-            <ul className="text-sm text-gray-700">
-              <li>
-                <strong>Empleado:</strong> {displayName} ({employee?.id})
-              </li>
-              <li>
-                <strong>Período:</strong> {String(month).padStart(2, "0")}/{year}
-              </li>
-              <li>
-                <strong>Estado:</strong> {period.status ?? "borrador"}
-              </li>
-              {typeof period.days_in_period === "number" ? (
-                <li>
-                  <strong>Días cotizados:</strong> {period.days_in_period}
-                </li>
-              ) : null}
-            </ul>
-
-            <button
-              onClick={handleGeneratePdf}
-              disabled={pdfLoading}
-              className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
-            >
-              {pdfLoading ? "Generando..." : "Generar PDF"}
-            </button>
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-gray-500">
-              Crea primero el período para poder editar la nómina.
-            </p>
-          </div>
-        )}
+        <p className="text-sm text-gray-600">
+          Selecciona el empleado y pulsa “Generar PDF”. Ahora usa la ruta mínima para validar flujo.
+        </p>
       </div>
     </div>
   );
