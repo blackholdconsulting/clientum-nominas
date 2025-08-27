@@ -24,7 +24,8 @@ function StatusChip({ status }: { status?: string | null }) {
   );
 }
 
-type Row = { id: string; month: number; status: string | null };
+type RawRow = { id: string; month?: number | null; period_month?: number | null; status: string | null };
+type Row   = { id: string; month: number; status: string | null };
 type OrgOption = { id: string; name: string };
 
 export default function PayrollGrid({ year }: { year: number }) {
@@ -47,13 +48,36 @@ export default function PayrollGrid({ year }: { year: number }) {
     (async () => {
       setLoading(true);
       setErr(null);
-      const { data, error } = await supabase
+
+      // Intento 1: year/month
+      let q = await supabase
         .from("payrolls")
         .select("id, month, status")
         .eq("year", year);
+
+      let data: RawRow[] | null = null;
+      if (!q.error) data = (q.data as RawRow[]) ?? null;
+
+      // Intento 2: period_year/period_month si no hay datos o error
+      if (!data || data.length === 0) {
+        q = await supabase
+          .from("payrolls")
+          .select("id, period_month, status")
+          .eq("period_year", year);
+        if (!q.error) data = (q.data as RawRow[]) ?? null;
+      }
+
       if (!alive) return;
-      if (error) setErr(error.message);
-      else setRows((data ?? []) as Row[]);
+      if (q.error) {
+        setErr(q.error.message);
+      } else {
+        const mapped: Row[] = (data ?? []).map((r) => ({
+          id: r.id,
+          month: (r.month ?? r.period_month ?? 0) as number,
+          status: r.status ?? null,
+        }));
+        setRows(mapped);
+      }
       setLoading(false);
     })();
     return () => { alive = false; };
@@ -93,7 +117,7 @@ export default function PayrollGrid({ year }: { year: number }) {
     params.set("year", String(year));
     params.set("month", String(month));
     if (orgId) params.set("orgId", orgId);
-    router.push(`/payroll?${params.toString()}`); // abre panel con editor
+    router.push(`/payroll?${params.toString()}`);
     router.refresh();
   };
 
@@ -157,6 +181,7 @@ export default function PayrollGrid({ year }: { year: number }) {
         })}
       </div>
 
+      {/* Modal organización (si aplica) */}
       <OrgPickerModal
         open={pickerOpen}
         orgs={pickerData}
@@ -166,9 +191,7 @@ export default function PayrollGrid({ year }: { year: number }) {
           const params = new URLSearchParams(sp);
           params.set("year", String(year));
           params.set("orgId", id);
-          // reflejar selección en URL
           router.replace(`/payroll?${params.toString()}`);
-          // reintentar creación con la organización elegida
           if (pendingMonth) create(pendingMonth, id);
         }}
       />
