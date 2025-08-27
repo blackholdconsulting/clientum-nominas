@@ -24,8 +24,13 @@ function StatusChip({ status }: { status?: string | null }) {
   );
 }
 
-type RawRow = { id: string; month?: number | null; period_month?: number | null; status: string | null };
-type Row   = { id: string; month: number; status: string | null };
+type RawRow = {
+  id: string;
+  month?: number | null;
+  period_month?: number | null;
+  status: string | null;
+};
+type Row = { id: string; month: number; status: string | null };
 type OrgOption = { id: string; name: string };
 
 export default function PayrollGrid({ year }: { year: number }) {
@@ -38,7 +43,8 @@ export default function PayrollGrid({ year }: { year: number }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // modal
+  // estado para crear & modal multi-org
+  const [busyFor, setBusyFor] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerData, setPickerData] = useState<OrgOption[]>([]);
   const [pendingMonth, setPendingMonth] = useState<number | null>(null);
@@ -58,7 +64,7 @@ export default function PayrollGrid({ year }: { year: number }) {
       let data: RawRow[] | null = null;
       if (!q.error) data = (q.data as RawRow[]) ?? null;
 
-      // Intento 2: period_year/period_month si no hay datos o error
+      // Intento 2: period_year/period_month
       if (!data || data.length === 0) {
         q = await supabase
           .from("payrolls")
@@ -68,9 +74,8 @@ export default function PayrollGrid({ year }: { year: number }) {
       }
 
       if (!alive) return;
-      if (q.error) {
-        setErr(q.error.message);
-      } else {
+      if (q.error) setErr(q.error.message);
+      else {
         const mapped: Row[] = (data ?? []).map((r) => ({
           id: r.id,
           month: (r.month ?? r.period_month ?? 0) as number,
@@ -89,36 +94,49 @@ export default function PayrollGrid({ year }: { year: number }) {
     return m;
   }, [rows]);
 
-  const create = async (month: number, forcedOrgId?: string) => {
-    const orgId = forcedOrgId ?? urlOrgId ?? undefined;
-
-    const res = await fetch("/api/payroll/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      cache: "no-store",
-      body: JSON.stringify({ year, month, orgId }),
-    });
-    const json = await res.json();
-
-    if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
-      setPendingMonth(month);
-      setPickerData(json.orgs as OrgOption[]);
-      setPickerOpen(true);
-      return;
-    }
-
-    if (!res.ok || !json.ok) {
-      alert(json.error ?? "No se ha podido crear el período.");
-      return;
-    }
-
+  const openEditor = (y: number, m: number, orgId?: string | null) => {
     const params = new URLSearchParams();
-    params.set("year", String(year));
-    params.set("month", String(month));
+    params.set("year", String(y));
+    params.set("month", String(m));
     if (orgId) params.set("orgId", orgId);
     router.push(`/payroll?${params.toString()}`);
     router.refresh();
+  };
+
+  const createAndOpen = async (m: number, forcedOrgId?: string) => {
+    setBusyFor(m);
+    try {
+      const orgId = forcedOrgId ?? urlOrgId ?? undefined;
+
+      const res = await fetch("/api/payroll/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ year, month: m, orgId }),
+      });
+      const json = await res.json();
+
+      if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
+        // pedir selección de organización y reintentar
+        setPendingMonth(m);
+        setPickerData(json.orgs as OrgOption[]);
+        setPickerOpen(true);
+        return;
+      }
+
+      // Si la API dice ok/created o ok/ya existía → abrir siempre el editor
+      if (res.ok && (json.ok || json.id)) {
+        openEditor(year, m, orgId);
+        return;
+      }
+
+      // Para cualquier otro caso, intentamos abrir el editor igualmente: si no existe, la pantalla lo dirá.
+      openEditor(year, m, orgId);
+      if (json?.error) console.warn("Crear nómina:", json.error);
+    } finally {
+      setBusyFor(null);
+    }
   };
 
   return (
@@ -155,23 +173,20 @@ export default function PayrollGrid({ year }: { year: number }) {
 
                   {exists ? (
                     <button
-                      onClick={() => {
-                        const params = new URLSearchParams();
-                        params.set("year", String(year));
-                        params.set("month", String(m));
-                        if (urlOrgId) params.set("orgId", urlOrgId);
-                        router.push(`/payroll?${params.toString()}`);
-                      }}
+                      onClick={() => openEditor(year, m, urlOrgId)}
                       className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
+                      title="Abrir editor"
                     >
                       Editar nómina
                     </button>
                   ) : (
                     <button
-                      onClick={() => create(m)}
-                      className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
+                      onClick={() => createAndOpen(m)}
+                      disabled={busyFor === m}
+                      className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF] disabled:opacity-50"
+                      title="Crear y abrir editor"
                     >
-                      Crear nómina
+                      {busyFor === m ? "Creando…" : "Crear nómina"}
                     </button>
                   )}
                 </div>
@@ -185,14 +200,13 @@ export default function PayrollGrid({ year }: { year: number }) {
       <OrgPickerModal
         open={pickerOpen}
         orgs={pickerData}
-        onCancel={() => setPickerOpen(false)}
+        onCancel={() => {
+          setPickerOpen(false);
+          setPendingMonth(null);
+        }}
         onConfirm={(id) => {
           setPickerOpen(false);
-          const params = new URLSearchParams(sp);
-          params.set("year", String(year));
-          params.set("orgId", id);
-          router.replace(`/payroll?${params.toString()}`);
-          if (pendingMonth) create(pendingMonth, id);
+          if (pendingMonth) createAndOpen(pendingMonth, id);
         }}
       />
     </>
