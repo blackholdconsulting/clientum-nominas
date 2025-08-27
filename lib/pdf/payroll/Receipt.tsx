@@ -1,195 +1,192 @@
+// lib/pdf/payroll/Receipt.tsx
 import React from "react";
-import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
+import {
+  Document,
+  Page,
+  Text,
+  View,
+  StyleSheet,
+} from "@react-pdf/renderer";
 
-export type ReceiptData = {
-  company: { name: string; cif: string; address?: string; ccc?: string };
-  employee: { name: string; nif?: string; ssn?: string; job_title?: string; iban?: string };
-  period: { year: number; month: number; days?: number | null };
-  items: Array<{ concept: string; amount: number; type: "earning" | "deduction" | string }>;
-  bases: { cotizacion: number; irpf: number };
-  contribEmployee: { ss: number; pctSS: number; irpf: number; pctIRPF: number; total: number };
-  contribEmployer: { ss: number; pctSS: number };
-  totals: { devengos: number; deducciones: number; neto: number };
-  erBreakdown?: Array<{ label: string; pct: number; amount: number }>; // desglose empresa
-  signatures?: {
-    employer?: { name?: string; at?: string; imageUrl?: string | null };
-    employee?: { name?: string; at?: string; imageUrl?: string | null };
+// Tipos mínimos para la plantilla (ajústalos a tus tablas reales)
+export type ReceiptInput = {
+  company: {
+    name: string;
+    cif?: string;
+    ccc?: string;
+    address?: string;
   };
+  employee: {
+    name: string;
+    email?: string;
+    position?: string;
+    nif?: string;
+    ssn?: string;
+    group?: string;
+  };
+  period: { year: number; month: number; label: string };
+  payroll: {
+    status?: string | null;
+    daysInPeriod?: number | null;
+  };
+  totals: {
+    devengos: number;
+    deducciones: number;
+    liquido: number;
+    base_cc: number; // base de cotización contingencias comunes
+    base_irpf: number;
+    irpf_pct: number;
+    ss_emp_pct: number; // trabajador
+  };
+  lines: Array<{
+    code?: string;
+    label: string;
+    units?: number;
+    amount: number; // importe total de la línea (+ devengo / - deducción)
+    category?: "salarial" | "no_salarial" | "deduccion";
+  }>;
 };
 
 const styles = StyleSheet.create({
-  page: { padding: 28, fontSize: 10 },
-  h1: { fontSize: 14, fontWeight: 700 },
-  h2: { fontSize: 11, fontWeight: 700, marginBottom: 4 },
-  row: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
-  box: { border: 1, borderColor: "#ddd", borderRadius: 4, padding: 8, marginBottom: 8 },
-  table: { borderRadius: 4, border: 1, borderColor: "#ddd", marginTop: 6 },
+  page: { padding: 24, fontSize: 10 },
+  h1: { fontSize: 14, fontWeight: 700, marginBottom: 6 },
+  h2: { fontSize: 12, fontWeight: 700, marginVertical: 6 },
+  row: { flexDirection: "row", gap: 8 },
+  col: { flexDirection: "column", gap: 4 },
+  card: { border: 1, borderColor: "#ddd", padding: 8, borderRadius: 4 },
+  table: { width: "100%", border: 1, borderColor: "#ddd", marginTop: 6 },
   tr: { flexDirection: "row" },
-  th: { flex: 1, padding: 6, backgroundColor: "#f4f6f8", borderRight: 1, borderColor: "#ddd", fontWeight: 700 },
-  td: { flex: 1, padding: 6, borderTop: 1, borderRight: 1, borderColor: "#eee" },
-  tdRight: { textAlign: "right" },
-  signatureWrap: { marginTop: 18, flexDirection: "row", justifyContent: "space-between", gap: 18 },
-  signatureBox: { width: "48%" },
-  signLine: { marginTop: 6, borderTop: 1, borderColor: "#aaa", height: 0 },
-  small: { fontSize: 9, color: "#555" },
+  th: {
+    flex: 1,
+    fontWeight: 700,
+    padding: 6,
+    borderRight: 1,
+    borderBottom: 1,
+    borderColor: "#ddd",
+  },
+  td: {
+    flex: 1,
+    padding: 6,
+    borderRight: 1,
+    borderBottom: 1,
+    borderColor: "#eee",
+  },
+  right: { textAlign: "right" },
+  small: { fontSize: 9, color: "#666" },
+  badge: {
+    fontSize: 9,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: "#eef2ff",
+    color: "#312e81",
+    alignSelf: "flex-start",
+  },
 });
 
-function toEur(n: number) {
-  return (n ?? 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" });
-}
-function pct(n: number) {
-  return `${(n ?? 0).toFixed(2)}%`;
+function money(n: number) {
+  return new Intl.NumberFormat("es-ES", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+  }).format(n || 0);
 }
 
-export default function ReceiptPDF(d: ReceiptData) {
-  const month = String(d.period.month).padStart(2, "0");
-  const earnings = d.items.filter((i) => (i.type ?? "earning") === "earning");
-  const deductions = d.items.filter((i) => (i.type ?? "").toString() === "deduction");
+export default function ReceiptPDF(props: ReceiptInput) {
+  const { company, employee, period, payroll, totals, lines } = props;
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        <View style={{ marginBottom: 10 }}>
-          <Text style={styles.h1}>Recibo de Salarios · {month}/{d.period.year}</Text>
-          <Text style={styles.small}>
-            De acuerdo con el art. 29 del ET y la Orden ESS/2098/2014 (o normativa vigente).
-          </Text>
+        <View style={[styles.row, { justifyContent: "space-between" }]}>
+          <View>
+            <Text style={styles.h1}>{company.name}</Text>
+            {company.cif ? <Text style={styles.small}>CIF: {company.cif}</Text> : null}
+            {company.ccc ? <Text style={styles.small}>CCC: {company.ccc}</Text> : null}
+            {company.address ? <Text style={styles.small}>{company.address}</Text> : null}
+          </View>
+          <View style={styles.col}>
+            <Text style={styles.badge}>
+              Recibo de salarios — {period.label}
+            </Text>
+            {payroll.status ? (
+              <Text style={styles.small}>Estado: {payroll.status}</Text>
+            ) : null}
+          </View>
         </View>
 
-        <View style={styles.row}>
-          <View style={[styles.box, { flex: 1 }]}>
-            <Text style={styles.h2}>Empresa</Text>
-            <Text>Nombre: {d.company.name}</Text>
-            <Text>CIF/NIF: {d.company.cif}</Text>
-            <Text>CCC: {d.company.ccc ?? "—"}</Text>
-            <Text>Dirección: {d.company.address ?? "—"}</Text>
-          </View>
-          <View style={[styles.box, { flex: 1 }]}>
+        <View style={[styles.row, { marginTop: 10 }]}>
+          <View style={[styles.card, { flex: 1 }]}>
             <Text style={styles.h2}>Trabajador/a</Text>
-            <Text>Nombre: {d.employee.name}</Text>
-            <Text>NIF/NIE: {d.employee.nif ?? "—"}</Text>
-            <Text>Nº SS: {d.employee.ssn ?? "—"}</Text>
-            <Text>Puesto: {d.employee.job_title ?? "—"}</Text>
-            <Text>IBAN: {d.employee.iban ?? "—"}</Text>
+            <Text>{employee.name}</Text>
+            {employee.position ? <Text style={styles.small}>{employee.position}</Text> : null}
+            {employee.email ? <Text style={styles.small}>{employee.email}</Text> : null}
+            {employee.nif ? <Text style={styles.small}>NIF: {employee.nif}</Text> : null}
+            {employee.ssn ? <Text style={styles.small}>Nº SS: {employee.ssn}</Text> : null}
+            {employee.group ? (
+              <Text style={styles.small}>Grupo cotización: {employee.group}</Text>
+            ) : null}
+          </View>
+
+          <View style={[styles.card, { flex: 1 }]}>
+            <Text style={styles.h2}>Bases y tipos</Text>
+            <Text>Base CC: {money(totals.base_cc)}</Text>
+            <Text>Base IRPF: {money(totals.base_irpf)}</Text>
+            <Text>IRPF: {totals.irpf_pct.toFixed(2)}%</Text>
+            <Text>SS trabajador: {totals.ss_emp_pct.toFixed(2)}%</Text>
+            {typeof payroll.daysInPeriod === "number" ? (
+              <Text>Días cotizados: {payroll.daysInPeriod}</Text>
+            ) : null}
           </View>
         </View>
 
-        <View style={styles.box}>
-          <Text>Periodo: {month}/{d.period.year} · Días cotizados: {d.period.days ?? "—"}</Text>
-          <Text>Bases: Cotización {toEur(d.bases.cotizacion)} · IRPF {toEur(d.bases.irpf)}</Text>
-        </View>
-
-        {/* Devengos */}
         <View style={styles.table}>
           <View style={styles.tr}>
-            <Text style={[styles.th, { flex: 3 }]}>Devengos</Text>
-            <Text style={[styles.th, styles.tdRight]}>Importe</Text>
+            <Text style={styles.th}>Concepto</Text>
+            <Text style={[styles.th, styles.right]}>Unid.</Text>
+            <Text style={[styles.th, styles.right]}>Importe</Text>
           </View>
-          {earnings.length === 0 ? (
-            <View style={styles.tr}>
-              <Text style={[styles.td, { flex: 3 }]}>—</Text>
-              <Text style={[styles.td, styles.tdRight]}>—</Text>
-            </View>
-          ) : (
-            earnings.map((e, i) => (
-              <View style={styles.tr} key={`e-${i}`}>
-                <Text style={[styles.td, { flex: 3 }]}>{e.concept}</Text>
-                <Text style={[styles.td, styles.tdRight]}>{toEur(e.amount)}</Text>
-              </View>
-            ))
-          )}
-          <View style={styles.tr}>
-            <Text style={[styles.td, { flex: 3, fontWeight: 700 }]}>Total devengos</Text>
-            <Text style={[styles.td, styles.tdRight, { fontWeight: 700 }]}>{toEur(d.totals.devengos)}</Text>
-          </View>
-        </View>
-
-        {/* Deducciones */}
-        <View style={[styles.table, { marginTop: 10 }]}>
-          <View style={styles.tr}>
-            <Text style={[styles.th, { flex: 3 }]}>Deducciones</Text>
-            <Text style={[styles.th, styles.tdRight]}>Importe</Text>
-          </View>
-          <View style={styles.tr}>
-            <Text style={[styles.td, { flex: 3 }]}>
-              Seguridad Social Trabajador ({pct(d.contribEmployee.pctSS)})
-            </Text>
-            <Text style={[styles.td, styles.tdRight]}>{toEur(d.contribEmployee.ss)}</Text>
-          </View>
-          <View style={styles.tr}>
-            <Text style={[styles.td, { flex: 3 }]}>IRPF ({pct(d.contribEmployee.pctIRPF)})</Text>
-            <Text style={[styles.td, styles.tdRight]}>{toEur(d.contribEmployee.irpf)}</Text>
-          </View>
-          {deductions.map((e, i) => (
-            <View style={styles.tr} key={`d-${i}`}>
-              <Text style={[styles.td, { flex: 3 }]}>{e.concept}</Text>
-              <Text style={[styles.td, styles.tdRight]}>{toEur(e.amount)}</Text>
+          {lines.map((l, i) => (
+            <View key={i} style={styles.tr}>
+              <Text style={styles.td}>
+                {l.label}
+                {l.code ? ` (${l.code})` : ""}
+              </Text>
+              <Text style={[styles.td, styles.right]}>
+                {typeof l.units === "number" ? l.units.toFixed(2) : "—"}
+              </Text>
+              <Text style={[styles.td, styles.right]}>{money(l.amount)}</Text>
             </View>
           ))}
-          <View style={styles.tr}>
-            <Text style={[styles.td, { flex: 3, fontWeight: 700 }]}>Total deducciones</Text>
-            <Text style={[styles.td, styles.tdRight, { fontWeight: 700 }]}>{toEur(d.totals.deducciones)}</Text>
-          </View>
         </View>
 
-        {/* Resumen Neto */}
-        <View style={[styles.box, { marginTop: 10 }]}>
-          <Text style={styles.h2}>Resumen</Text>
-          <Text>Devengos: {toEur(d.totals.devengos)} · Deducciones: {toEur(d.totals.deducciones)}</Text>
-          <Text style={{ fontSize: 12, fontWeight: 700 }}>Neto a percibir: {toEur(d.totals.neto)}</Text>
-        </View>
-
-        {/* Aportación empresa */}
-        <View style={[styles.box, { marginTop: 6 }]}>
-          <Text style={styles.h2}>Aportación empresa</Text>
-          <Text>Total SS empresa ({pct(d.contribEmployer.pctSS)}): {toEur(d.contribEmployer.ss)}</Text>
-          {d.erBreakdown && d.erBreakdown.length > 0 ? (
-            <View style={[styles.table, { marginTop: 6 }]}>
-              <View style={styles.tr}>
-                <Text style={[styles.th, { flex: 3 }]}>Concepto</Text>
-                <Text style={[styles.th]}>%</Text>
-                <Text style={[styles.th, styles.tdRight]}>Importe</Text>
-              </View>
-              {d.erBreakdown.map((b, i) => (
-                <View style={styles.tr} key={`er-${i}`}>
-                  <Text style={[styles.td, { flex: 3 }]}>{b.label}</Text>
-                  <Text style={[styles.td]}>{pct(b.pct)}</Text>
-                  <Text style={[styles.td, styles.tdRight]}>{toEur(b.amount)}</Text>
-                </View>
-              ))}
+        <View style={[styles.row, { marginTop: 10 }]}>
+          <View style={[styles.card, { flex: 1 }]}>
+            <Text style={styles.h2}>Totales</Text>
+            <View style={styles.row}>
+              <Text style={{ flex: 1 }}>Devengos</Text>
+              <Text style={[styles.right, { flex: 1 }]}>{money(totals.devengos)}</Text>
             </View>
-          ) : null}
-          <Text style={[styles.small, { marginTop: 6 }]}>
-            * Tipos pueden variar según CNAE, tramo de cotización y contrato. Revise su convenio y
-            las tablas vigentes de la TGSS.
-          </Text>
+            <View style={styles.row}>
+              <Text style={{ flex: 1 }}>Deducciones</Text>
+              <Text style={[styles.right, { flex: 1 }]}>
+                {money(totals.deducciones)}
+              </Text>
+            </View>
+            <View style={[styles.row, { marginTop: 6 }]}>
+              <Text style={{ flex: 1, fontWeight: 700 }}>Líquido a percibir</Text>
+              <Text style={[styles.right, { flex: 1, fontWeight: 700 }]}>
+                {money(totals.liquido)}
+              </Text>
+            </View>
+          </View>
         </View>
 
-        {/* Firmas */}
-        <View style={styles.signatureWrap}>
-          <View style={styles.signatureBox}>
-            <Text>La empresa</Text>
-            {d.signatures?.employer?.imageUrl ? (
-              <Image src={d.signatures.employer.imageUrl} style={{ width: 180, height: 60, marginTop: 8 }} />
-            ) : null}
-            <View style={styles.signLine} />
-            <Text>{d.signatures?.employer?.name ?? "Firma y sello"}</Text>
-            {d.signatures?.employer?.at ? (
-              <Text style={styles.small}>Firmado: {d.signatures.employer.at}</Text>
-            ) : null}
-          </View>
-
-          <View style={styles.signatureBox}>
-            <Text>Recibí: el/la trabajador/a</Text>
-            {d.signatures?.employee?.imageUrl ? (
-              <Image src={d.signatures.employee.imageUrl} style={{ width: 180, height: 60, marginTop: 8 }} />
-            ) : null}
-            <View style={styles.signLine} />
-            <Text>{d.signatures?.employee?.name ?? "Firma"}</Text>
-            {d.signatures?.employee?.at ? (
-              <Text style={styles.small}>Firmado: {d.signatures.employee.at}</Text>
-            ) : null}
-          </View>
+        <View style={{ marginTop: 14 }}>
+          <Text style={styles.small}>
+            Este recibo se expide conforme al Estatuto de los Trabajadores y normativa de
+            Seguridad Social vigente.
+          </Text>
         </View>
       </Page>
     </Document>
