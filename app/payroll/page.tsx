@@ -1,9 +1,9 @@
-// Render dinámico (sin caché) — no consultamos Supabase en server aquí
+// Forzamos dinámico: no SSR de datos aquí
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import Link from "next/link";
-import CreatePeriodButton from "@/components/payroll/CreatePeriodButton";
+import PayrollToolbar from "@/components/payroll/PayrollToolbar";
 import PayrollGrid from "@/components/payroll/PayrollGrid";
 
 type PageProps = {
@@ -12,54 +12,51 @@ type PageProps = {
 
 export default function PayrollPage({ searchParams }: PageProps) {
   const now = new Date();
-  const selectedYear = Number(
-    typeof searchParams?.year === "string" ? searchParams.year : now.getFullYear()
-  );
-  const openMonth = Number(typeof searchParams?.month === "string" ? searchParams.month : 0);
+  const year = Number(typeof searchParams?.year === "string" ? searchParams.year : now.getFullYear());
+  const monthOpen = Number(typeof searchParams?.month === "string" ? searchParams.month : 0);
 
   return (
     <div className="flex h-[calc(100vh-0px)]">
-      {/* Columna izquierda: grid de meses */}
-      <div className="w-full max-w-[880px] flex-1 border-r bg-white">
-        <div className="flex items-center justify-between px-6 pt-6">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Gestión de Nóminas</h1>
-            <p className="text-xs text-gray-500">
-              Selecciona un período para preparar las nóminas de tu equipo.
-            </p>
+      {/* Columna principal */}
+      <div className="w-full max-w-[980px] flex-1 border-r bg-white">
+        {/* Topbar estilo Clientum */}
+        <div className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
+          <div className="mx-auto flex max-w-[980px] items-center justify-between gap-3 px-6 py-4">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Gestión de Nóminas</h1>
+              <p className="text-xs text-gray-500">Prepara, revisa y guarda las nóminas de tu equipo.</p>
+            </div>
+            <PayrollToolbar defaultYear={year} />
           </div>
-
-        {/* Botón global (cliente) */}
-          <CreatePeriodButton defaultYear={selectedYear} />
         </div>
 
-        <div className="px-6 pb-8 pt-5">
-          {/* Grid en cliente: consulta Supabase con RLS */}
-          <PayrollGrid year={selectedYear} />
+        {/* Grid (carga en cliente con RLS) */}
+        <div className="mx-auto max-w-[980px] px-6 py-5">
+          <PayrollGrid year={year} />
         </div>
       </div>
 
-      {/* Panel lateral con el editor embebido (mantiene UX original) */}
+      {/* Panel lateral (iframe del editor con empleados a la izquierda) */}
       <div
         className={`relative h-full w-[0px] overflow-hidden transition-all duration-200 ${
-          openMonth ? "w-[min(900px,50vw)] border-l" : ""
+          monthOpen ? "w-[min(980px,52vw)] border-l" : ""
         }`}
       >
-        {openMonth ? (
+        {monthOpen ? (
           <div className="flex h-full flex-col bg-gray-50">
             <div className="flex items-center justify-between border-b bg-white px-4 py-3">
               <div className="text-sm font-medium text-gray-800">
-                Editor — {String(openMonth).padStart(2, "0")}/{selectedYear}
+                Editor — {String(monthOpen).padStart(2, "0")}/{year}
               </div>
               <Link
-                href={`/payroll?year=${selectedYear}`}
-                className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                href={`/payroll?year=${year}`}
+                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
               >
                 Cerrar
               </Link>
             </div>
             <iframe
-              src={`/payroll/editor?year=${selectedYear}&month=${openMonth}`}
+              src={`/payroll/editor?year=${year}&month=${monthOpen}`}
               className="h-full w-full"
             />
           </div>
