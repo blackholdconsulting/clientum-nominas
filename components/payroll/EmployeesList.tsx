@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 type Employee = {
@@ -15,15 +15,15 @@ type Employee = {
 
 export default function EmployeesList({ year, month }: { year: number; month: number }) {
   const supabase = useMemo(() => supabaseBrowser(), []);
-  const router = useRouter();
   const sp = useSearchParams();
+  const router = useRouter();
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [term, setTerm] = useState("");
 
-  // Cargar empleados (RLS multi-tenant)
+  // Carga (RLS multi-tenant)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -43,15 +43,15 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
     return () => { alive = false; };
   }, [supabase]);
 
-  // Búsqueda local
+  // Filtro
   const filtered = useMemo(() => {
     const q = term.trim().toLowerCase();
     if (!q) return employees;
     return employees.filter((e) => {
       const name =
-        (e.full_name ??
+        ((e.full_name ??
           [e.first_name, e.last_name].filter(Boolean).join(" ")) ||
-        "Empleado"; // () para mezclar ?? con ||
+          "Empleado");
       return (
         name.toLowerCase().includes(q) ||
         (e.email ?? "").toLowerCase().includes(q) ||
@@ -60,7 +60,7 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
     });
   }, [employees, term]);
 
-  // Abrir nómina de un empleado DENTRO del iframe (ruta /payroll/editor)
+  // Abrir nómina de un empleado DENTRO del iframe (navegación dura)
   const openEmployee = (empId: string) => {
     const orgId = sp.get("orgId");
     const params = new URLSearchParams();
@@ -69,9 +69,14 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
     params.set("employee", empId);
     if (orgId) params.set("orgId", orgId);
 
-    // MUY IMPORTANTE: navegamos dentro del iframe a /payroll/editor (NO a /payroll)
-    router.push(`/payroll/editor?${params.toString()}`);
-    router.refresh();
+    const url = `/payroll/editor?${params.toString()}`;
+
+    // Forzamos carga completa dentro del iframe (evita overlays anidados y problemas de cache/shallow routing)
+    if (typeof window !== "undefined") {
+      window.location.assign(url);
+    } else {
+      router.push(url);
+    }
   };
 
   return (
