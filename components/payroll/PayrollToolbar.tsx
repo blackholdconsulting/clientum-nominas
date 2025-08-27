@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import OrgPickerModal from "@/components/payroll/OrgPickerModal";
 
 const MONTHS = [
   "01 · Enero","02 · Febrero","03 · Marzo","04 · Abril","05 · Mayo","06 · Junio",
@@ -50,41 +51,37 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
 
   const [year, setYear] = useState<number>(defaultYear ?? now.getFullYear());
   const [month, setMonth] = useState<number>(now.getMonth() + 1);
-  const [busy, setBusy] = useState(false);
 
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [orgId, setOrgId] = useState<string | null>(sp.get("orgId"));
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  // Cargar organizaciones (RLS por usuario)
+  // 1) Cargar organizaciones del usuario (sin depender de tabla orgs para el nombre)
   useEffect(() => {
     let alive = true;
     (async () => {
-      // 1) org_members -> lista de org_id del usuario
-      const { data: memberships, error: mErr } = await supabase
+      const { data: memberships } = await supabase
         .from("org_members")
-        .select("org_id");
-      if (mErr) {
-        setOrgs([]);
-        return;
-      }
+        .select("org_id")
+        .limit(10);
       const ids = (memberships ?? []).map((m: any) => m.org_id).filter(Boolean);
-      if (!ids.length) {
-        setOrgs([]);
-        return;
-      }
-      // 2) orgs -> nombre legible
-      const { data: orgRows, error: oErr } = await supabase
-        .from("orgs")
-        .select("id,name")
-        .in("id", ids);
-      if (oErr) {
-        setOrgs(ids.map((id: string) => ({ id, name: id.slice(0, 8) })));
-        return;
-      }
       if (!alive) return;
-      const options = (orgRows ?? []).map((r: any) => ({ id: r.id as string, name: (r.name as string) || r.id.slice(0,8) }));
+
+      // Intentamos nombres en orgs; si falla, usamos el id recortado
+      let options: OrgOption[] = ids.map((id: string) => ({ id, name: id.slice(0, 8) }));
+      if (ids.length) {
+        const { data: named } = await supabase
+          .from("orgs")
+          .select("id,name")
+          .in("id", ids);
+        if (named && named.length) {
+          const map = new Map(named.map((r: any) => [r.id, r.name || r.id.slice(0, 8)]));
+          options = ids.map((id: string) => ({ id, name: map.get(id) as string }));
+        }
+      }
       setOrgs(options);
-      // Si no hay org seleccionada en URL, y solo hay 1, usarla
+
+      // Autoselección si solo hay 1 y no hay orgId en la URL
       if (!orgId && options.length === 1) {
         setOrgId(options[0].id);
         const params = new URLSearchParams(sp);
@@ -97,19 +94,19 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
-  // Cambiar año -> mantener orgId en URL
+  // 2) Navegar año manteniendo orgId
   const goYear = (y: number) => {
     setYear(y);
     const params = new URLSearchParams(sp);
     params.set("year", String(y));
     if (orgId) params.set("orgId", orgId);
-    params.delete("month"); // cerramos overlay si lo hubiera
+    params.delete("month"); // cerramos overlay
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  // Cambiar organización -> fijarla en URL
-  const chooseOrg = (id: string) => {
-    setOrgId(id || null);
+  // 3) Elegir org en toolbar
+  const chooseOrg = (id: string | null) => {
+    setOrgId(id);
     const params = new URLSearchParams(sp);
     params.set("year", String(year));
     if (id) params.set("orgId", id);
@@ -118,73 +115,103 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  const createAndOpen = async () => {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/payroll/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        cache: "no-store",
-        body: JSON.stringify({ year, month, orgId }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        alert(json.error ?? "No se ha podido crear la nómina.");
-      } else {
-        const params = new URLSearchParams();
-        params.set("year", String(year));
-        params.set("month", String(month));
-        if (orgId) params.set("orgId", orgId);
-        router.push(`${pathname}?${params.toString()}`); // abre panel
-        router.refresh();
+  // 4) Crear y abrir — con fallback: si no hay orgId y hay varias, abrimos modal
+  const createAndOpen = async (forcedOrgId?: string) => {
+    const finalOrgId = forcedOrgId ?? orgId;
+
+    if (!finalOrgId) {
+      // Si hay varias, mostrar modal
+      if (orgs.length > 1) {
+        setPickerOpen(true);
+        return;
       }
-    } finally {
-      setBusy(false);
+      // Si hay 1, usarla
+      if (orgs.length === 1) {
+        return createAndOpen(orgs[0].id);
+      }
+    }
+
+    const res = await fetch("/api/payroll/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify({ year, month, orgId: finalOrgId ?? undefined }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      // Fallback: si la API devuelve “Varias organizaciones…”, forzamos modal
+      if ((json.error || "").toLowerCase().includes("varias organizaciones")) {
+        setPickerOpen(true);
+        return;
+      }
+      alert(json.error ?? "No se ha podido crear la nómina.");
+    } else {
+      const params = new URLSearchParams();
+      params.set("year", String(year));
+      params.set("month", String(month));
+      if (finalOrgId) params.set("orgId", finalOrgId);
+      router.push(`${pathname}?${params.toString()}`);
+      router.refresh();
     }
   };
 
   return (
-    <div className="flex items-center gap-2">
-      {/* Botón volver al dashboard */}
-      <GhostLink href="/dashboard">Dashboard</GhostLink>
+    <>
+      <div className="flex items-center gap-2">
+        {/* Volver al dashboard */}
+        <GhostLink href="/dashboard">Dashboard</GhostLink>
 
-      {/* Selector de organización (solo si hay varias) */}
-      {orgs.length > 1 && (
+        {/* Selector de organización si hay más de una */}
+        {orgs.length > 1 && (
+          <select
+            value={orgId ?? ""}
+            onChange={(e) => chooseOrg(e.target.value || null)}
+            className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
+            title="Organización"
+          >
+            <option value="">Selecciona organización…</option>
+            {orgs.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {/* Mes / Año */}
         <select
-          value={orgId ?? ""}
-          onChange={(e) => chooseOrg(e.target.value)}
+          value={month}
+          onChange={(e) => setMonth(Number(e.target.value))}
           className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
-          title="Organización"
         >
-          <option value="">Selecciona organización…</option>
-          {orgs.map(o => (
-            <option key={o.id} value={o.id}>{o.name}</option>
+          {MONTHS.map((m, i) => (
+            <option key={i + 1} value={i + 1}>
+              {m}
+            </option>
           ))}
         </select>
-      )}
+        <input
+          type="number"
+          value={year}
+          onChange={(e) => goYear(Number(e.target.value))}
+          className="w-[92px] rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
+        />
 
-      {/* Mes / Año */}
-      <select
-        value={month}
-        onChange={(e) => setMonth(Number(e.target.value))}
-        className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
-      >
-        {MONTHS.map((m, i) => (
-          <option key={i + 1} value={i + 1}>{m}</option>
-        ))}
-      </select>
-      <input
-        type="number"
-        value={year}
-        onChange={(e) => goYear(Number(e.target.value))}
-        className="w-[92px] rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
+        <Cta onClick={() => createAndOpen()}>{/* busy lo gestiona la navegación */}Crear nómina</Cta>
+      </div>
+
+      {/* Modal de selección de organización (fallback robusto) */}
+      <OrgPickerModal
+        open={pickerOpen}
+        orgs={orgs}
+        onCancel={() => setPickerOpen(false)}
+        onConfirm={(id) => {
+          setPickerOpen(false);
+          chooseOrg(id);          // guardamos en URL
+          createAndOpen(id);      // y creamos con esa org
+        }}
       />
-
-      {/* CTA crear y abrir */}
-      <Cta onClick={createAndOpen} disabled={busy || (orgs.length > 1 && !orgId)}>
-        {busy ? "Creando…" : "Crear nómina"}
-      </Cta>
-    </div>
+    </>
   );
 }
