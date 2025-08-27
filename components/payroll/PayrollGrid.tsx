@@ -24,12 +24,7 @@ function StatusChip({ status }: { status?: string | null }) {
   );
 }
 
-type RawRow = {
-  id: string;
-  month?: number | null;
-  period_month?: number | null;
-  status: string | null;
-};
+type RawRow = { id: string; month?: number | null; period_month?: number | null; status: string | null };
 type Row = { id: string; month: number; status: string | null };
 type OrgOption = { id: string; name: string };
 
@@ -43,8 +38,7 @@ export default function PayrollGrid({ year }: { year: number }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // estado para crear & modal multi-org
-  const [busyFor, setBusyFor] = useState<number | null>(null);
+  // Crear & modal multi-org
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerData, setPickerData] = useState<OrgOption[]>([]);
   const [pendingMonth, setPendingMonth] = useState<number | null>(null);
@@ -55,21 +49,14 @@ export default function PayrollGrid({ year }: { year: number }) {
       setLoading(true);
       setErr(null);
 
-      // Intento 1: year/month
-      let q = await supabase
-        .from("payrolls")
-        .select("id, month, status")
-        .eq("year", year);
-
+      // 1) year/month
+      let q = await supabase.from("payrolls").select("id, month, status").eq("year", year);
       let data: RawRow[] | null = null;
       if (!q.error) data = (q.data as RawRow[]) ?? null;
 
-      // Intento 2: period_year/period_month
+      // 2) period_year/period_month
       if (!data || data.length === 0) {
-        q = await supabase
-          .from("payrolls")
-          .select("id, period_month, status")
-          .eq("period_year", year);
+        q = await supabase.from("payrolls").select("id, period_month, status").eq("period_year", year);
         if (!q.error) data = (q.data as RawRow[]) ?? null;
       }
 
@@ -103,40 +90,42 @@ export default function PayrollGrid({ year }: { year: number }) {
     router.refresh();
   };
 
-  const createAndOpen = async (m: number, forcedOrgId?: string) => {
-    setBusyFor(m);
+  /**
+   * Abrimos SIEMPRE el editor primero (UX inmediata) y lanzamos la creación en background.
+   * Si la API responde MULTI_ORG, pedimos la organización y reintetamos (el editor seguirá abierto).
+   */
+  const createPeriodInBackground = async (y: number, m: number, orgId?: string) => {
     try {
-      const orgId = forcedOrgId ?? urlOrgId ?? undefined;
-
       const res = await fetch("/api/payroll/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         cache: "no-store",
-        body: JSON.stringify({ year, month: m, orgId }),
+        body: JSON.stringify({ year: y, month: m, orgId }),
       });
       const json = await res.json();
 
       if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
-        // pedir selección de organización y reintentar
         setPendingMonth(m);
         setPickerData(json.orgs as OrgOption[]);
         setPickerOpen(true);
         return;
       }
 
-      // Si la API dice ok/created o ok/ya existía → abrir siempre el editor
-      if (res.ok && (json.ok || json.id)) {
-        openEditor(year, m, orgId);
-        return;
+      if (!res.ok && json?.error) {
+        // dejamos el editor abierto; solo registramos aviso en consola para debug
+        console.warn("Crear nómina (bg):", json.error);
       }
-
-      // Para cualquier otro caso, intentamos abrir el editor igualmente: si no existe, la pantalla lo dirá.
-      openEditor(year, m, orgId);
-      if (json?.error) console.warn("Crear nómina:", json.error);
-    } finally {
-      setBusyFor(null);
+    } catch (e) {
+      console.warn("Crear nómina (bg):", e);
     }
+  };
+
+  const handleCreateClick = (m: number) => {
+    // 1) abrir el editor de inmediato
+    openEditor(year, m, urlOrgId ?? undefined);
+    // 2) crear en segundo plano (si ya existe no pasa nada)
+    createPeriodInBackground(year, m, urlOrgId ?? undefined);
   };
 
   return (
@@ -173,6 +162,7 @@ export default function PayrollGrid({ year }: { year: number }) {
 
                   {exists ? (
                     <button
+                      type="button"
                       onClick={() => openEditor(year, m, urlOrgId)}
                       className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
                       title="Abrir editor"
@@ -181,12 +171,12 @@ export default function PayrollGrid({ year }: { year: number }) {
                     </button>
                   ) : (
                     <button
-                      onClick={() => createAndOpen(m)}
-                      disabled={busyFor === m}
-                      className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF] disabled:opacity-50"
+                      type="button"
+                      onClick={() => handleCreateClick(m)}
+                      className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
                       title="Crear y abrir editor"
                     >
-                      {busyFor === m ? "Creando…" : "Crear nómina"}
+                      Crear nómina
                     </button>
                   )}
                 </div>
@@ -196,7 +186,7 @@ export default function PayrollGrid({ year }: { year: number }) {
         })}
       </div>
 
-      {/* Modal organización (si aplica) */}
+      {/* Modal organización (si aplica por MULTI_ORG) */}
       <OrgPickerModal
         open={pickerOpen}
         orgs={pickerData}
@@ -206,7 +196,10 @@ export default function PayrollGrid({ year }: { year: number }) {
         }}
         onConfirm={(id) => {
           setPickerOpen(false);
-          if (pendingMonth) createAndOpen(pendingMonth, id);
+          if (pendingMonth) {
+            // el editor ya está abierto; reintentamos la creación con la org seleccionada
+            createPeriodInBackground(year, pendingMonth, id);
+          }
         }}
       />
     </>
