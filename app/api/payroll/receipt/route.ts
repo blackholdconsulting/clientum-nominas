@@ -54,7 +54,6 @@ export async function POST(req: Request) {
     let status: string | null = null;
     let days_in_period: number | null = null;
 
-    // intentamos year/month
     const r1 = await supabase
       .from("payrolls")
       .select("id, status, days_in_period")
@@ -66,7 +65,6 @@ export async function POST(req: Request) {
       status = r1.data.status ?? null;
       days_in_period = r1.data.days_in_period ?? null;
     } else {
-      // fallback period_year/period_month
       const r2 = await supabase
         .from("payrolls")
         .select("id, status, days_in_period")
@@ -79,7 +77,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3) Montar los datos mínimos para la plantilla
+    // 3) Datos para la plantilla
     const input: ReceiptInput = {
       company: {
         name: "Clientum (demo)",
@@ -121,11 +119,10 @@ export async function POST(req: Request) {
       ],
     };
 
-    // 4) Generar PDF
+    // 4) Generar PDF (JSX OK porque es .tsx)
     const buffer = await pdf(<ReceiptPDF {...input} />).toBuffer();
 
-    // 5) (Opcional) Subir a Storage (privado). El usuario actual (sesión del cookie)
-    // debe tener permisos para subir al bucket (Policies).
+    // 5) (Opcional) Subir a Storage
     let publicUrl: string | null = null;
     if (upload) {
       const filename = `nomina_${year}_${String(month).padStart(2, "0")}_${(employeeId ?? "emp").slice(0, 8)}.pdf`;
@@ -136,31 +133,22 @@ export async function POST(req: Request) {
           contentType: "application/pdf",
           upsert: true,
         });
-      if (upErr) {
-        // No detenemos la respuesta del PDF si falla el upload: sólo informativo
-        console.warn("Upload Storage error:", upErr.message);
-      } else {
+      if (!upErr) {
         const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
         publicUrl = pub.publicUrl ?? null;
       }
     }
 
-    // 6) Responder con el PDF como archivo
     return new Response(buffer, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="recibo_${year}_${String(
-          month
-        ).padStart(2, "0")}.pdf"`,
+        "Content-Disposition": `inline; filename="recibo_${year}_${String(month).padStart(2, "0")}.pdf"`,
         ...(publicUrl ? { "X-File-Url": publicUrl } : {}),
       },
     });
   } catch (e: any) {
     console.error(e);
-    return Response.json(
-      { error: e?.message ?? "Error generando el PDF" },
-      { status: 500 }
-    );
+    return Response.json({ error: e?.message ?? "Error generando el PDF" }, { status: 500 });
   }
 }
