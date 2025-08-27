@@ -19,6 +19,7 @@ type PayrollRow = {
   month?: number | null;
   period_year?: number | null;
   period_month?: number | null;
+  days_in_period?: number | null;
 };
 
 export default function EmployeePayrollEditor({
@@ -38,14 +39,16 @@ export default function EmployeePayrollEditor({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // Cargar empleado + período (soporta year/month y period_year/period_month)
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  // Cargar empleado + periodo
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       setErr(null);
 
-      // 1) Empleado
+      // Empleado
       const { data: emp, error: e1 } = await supabase
         .from("employees")
         .select("id, full_name, first_name, last_name, email, position")
@@ -60,12 +63,12 @@ export default function EmployeePayrollEditor({
       }
       setEmployee(emp as Employee);
 
-      // 2) Período (year/month o period_year/period_month)
+      // Periodo (admite year/month o period_year/period_month)
       let per: PayrollRow | null = null;
 
       const q1 = await supabase
         .from("payrolls")
-        .select("id, status, year, month")
+        .select("id, status, year, month, days_in_period")
         .eq("year", year)
         .eq("month", month)
         .maybeSingle();
@@ -75,7 +78,7 @@ export default function EmployeePayrollEditor({
       } else {
         const q2 = await supabase
           .from("payrolls")
-          .select("id, status, period_year, period_month")
+          .select("id, status, period_year, period_month, days_in_period")
           .eq("period_year", year)
           .eq("period_month", month)
           .maybeSingle();
@@ -95,7 +98,7 @@ export default function EmployeePayrollEditor({
     (employee?.full_name ??
       [employee?.first_name, employee?.last_name].filter(Boolean).join(" ")) || "Empleado";
 
-  // Crear el período si no existe (mínimo viable)
+  // Crear el periodo si no existe (mínimo viable)
   const ensurePeriod = async () => {
     try {
       const res = await fetch("/api/payroll/create", {
@@ -109,9 +112,48 @@ export default function EmployeePayrollEditor({
         alert(json?.error || "No se pudo crear el período.");
         return;
       }
-      setPeriod(json?.period || { id: json?.id, status: "draft" });
+      setPeriod(json?.period || { id: json?.id, status: "draft" } as any);
     } catch (e: any) {
       alert(e?.message || "Error creando período.");
+    }
+  };
+
+  // === GENERAR PDF: llama al endpoint y abre el PDF en una pestaña ===
+  const handleGeneratePdf = async () => {
+    try {
+      setPdfLoading(true);
+      const res = await fetch("/api/payroll/receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          year,
+          month,
+          employeeId,
+          orgId,
+          upload: false, // pon a true si quieres subirlo a Storage
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "No se pudo generar el PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      // Abrimos el PDF en una pestaña/ventana nueva
+      const win = window.open(url, "_blank");
+      if (!win) {
+        // fallback por si el navegador bloquea popups
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.click();
+      }
+    } catch (e: any) {
+      alert(e?.message || "Error al generar PDF");
+    } finally {
+      setPdfLoading(false);
     }
   };
 
@@ -132,7 +174,7 @@ export default function EmployeePayrollEditor({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Cabecera del editor */}
+      {/* Cabecera */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
           <p className="text-sm font-semibold text-gray-900">{displayName}</p>
@@ -160,15 +202,13 @@ export default function EmployeePayrollEditor({
         </div>
       </div>
 
-      {/* Cuerpo del editor (mínimo viable; aquí irán tus inputs/calculadora/guardado) */}
+      {/* Cuerpo del editor (placeholder para tus formularios reales) */}
       <div className="flex-1 overflow-y-auto p-4">
         {period ? (
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-gray-900">Datos de nómina</h3>
             <p className="text-sm text-gray-600">
-              Aquí puedes montar los formularios de devengos/deducciones, bases de cotización,
-              IRPF, etc. Este componente ya recibe <code>year</code>, <code>month</code> y{" "}
-              <code>employeeId</code>, y tiene localizado el período.
+              Aquí puedes montar los formularios de devengos/deducciones, bases de cotización, IRPF, etc.
             </p>
             <ul className="text-sm text-gray-700">
               <li>
@@ -180,14 +220,19 @@ export default function EmployeePayrollEditor({
               <li>
                 <strong>Estado:</strong> {period.status ?? "borrador"}
               </li>
+              {typeof period.days_in_period === "number" ? (
+                <li>
+                  <strong>Días cotizados:</strong> {period.days_in_period}
+                </li>
+              ) : null}
             </ul>
 
-            {/* Botón de PDF de ejemplo (conéctalo a tu endpoint cuando quieras) */}
             <button
-              onClick={() => alert("Generar PDF: aquí conectamos con tu endpoint /api/payroll/receipt")}
-              className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:opacity-95"
+              onClick={handleGeneratePdf}
+              disabled={pdfLoading}
+              className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
             >
-              Generar PDF
+              {pdfLoading ? "Generando..." : "Generar PDF"}
             </button>
           </div>
         ) : (
