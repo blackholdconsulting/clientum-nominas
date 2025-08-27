@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-// ---- helpers ---------------------------------------------------------------
+// Helpers -------------------------------------------------
 function eur(n: any) {
   const num = Number(n || 0);
   return new Intl.NumberFormat("es-ES", {
@@ -100,7 +100,7 @@ function okPdf(bytes: Uint8Array, year: number, month: number) {
   });
 }
 
-// ---- GET (para abrir con link) --------------------------------------------
+// GET: abrir con link (querystring)
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -120,7 +120,7 @@ export async function GET(req: Request) {
   }
 }
 
-// ---- POST (para fetch desde el editor) ------------------------------------
+// POST: por si en el futuro lo vuelves a usar vía fetch
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
