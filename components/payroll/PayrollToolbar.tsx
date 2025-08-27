@@ -4,20 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import OrgPickerModal from "@/components/payroll/OrgPickerModal";
+import { openPayrollPopup } from "@/lib/utils/openPayrollPopup";
 
 const MONTHS = [
-  "01 · Enero",
-  "02 · Febrero",
-  "03 · Marzo",
-  "04 · Abril",
-  "05 · Mayo",
-  "06 · Junio",
-  "07 · Julio",
-  "08 · Agosto",
-  "09 · Septiembre",
-  "10 · Octubre",
-  "11 · Noviembre",
-  "12 · Diciembre",
+  "01 · Enero","02 · Febrero","03 · Marzo","04 · Abril","05 · Mayo","06 · Junio",
+  "07 · Julio","08 · Agosto","09 · Septiembre","10 · Octubre","11 · Noviembre","12 · Diciembre",
 ];
 
 function Cta(
@@ -80,19 +71,12 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
         .select("org_id")
         .limit(20);
 
-      const ids = (memberships ?? [])
-        .map((m: any) => m.org_id)
-        .filter(Boolean);
-
+      const ids = (memberships ?? []).map((m: any) => m.org_id).filter(Boolean);
       let options: OrgOption[] = ids.map((id: string) => ({ id, name: id.slice(0, 8) }));
 
       if (ids.length) {
-        const { data: named } = await supabase
-          .from("orgs")
-          .select("id,name")
-          .in("id", ids);
-
-        if (named && named.length) {
+        const { data: named } = await supabase.from("orgs").select("id,name").in("id", ids);
+        if (named?.length) {
           const map = new Map(named.map((r: any) => [r.id, r.name || r.id]));
           options = ids.map((id) => ({ id, name: (map.get(id) as string) ?? id }));
         }
@@ -101,7 +85,6 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
       if (!alive) return;
       setOrgs(options);
 
-      // Autoselección si solo hay una
       if (!orgId && options.length === 1) {
         setOrgId(options[0].id);
         const params = new URLSearchParams(sp);
@@ -110,25 +93,11 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
         router.replace(`${pathname}?${params.toString()}`);
       }
     })();
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
-  // Navegación con overlay (editor=1)
-  const openEditor = (y: number, m: number, org?: string | null) => {
-    const params = new URLSearchParams();
-    params.set("year", String(y));
-    params.set("month", String(m));
-    params.set("editor", "1"); // ← fuerza apertura del overlay flotante
-    if (org) params.set("orgId", org);
-    router.push(`${pathname}?${params.toString()}`);
-    router.refresh();
-  };
-
-  // Crear período en background (no bloquea la UI)
+  // Crear período en background
   const createInBackground = async (y: number, m: number, org?: string) => {
     try {
       const res = await fetch("/api/payroll/create", {
@@ -139,16 +108,10 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
         body: JSON.stringify({ year: y, month: m, orgId: org }),
       });
       const json = await res.json();
-
-      // MULTI_ORG → pedimos selección
       if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
         setPickerData(json.orgs as OrgOption[]);
         setPickerOpen(true);
-        return;
-      }
-
-      if (!res.ok && json?.error) {
-        // No interrumpimos: el overlay ya está abierto. Solo log.
+      } else if (!res.ok && json?.error) {
         console.warn("Crear nómina (toolbar bg):", json.error);
       }
     } catch (e) {
@@ -156,10 +119,11 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     }
   };
 
-  // Click "Crear nómina": abrir overlay primero y lanzar creación en segundo plano
   const onCreate = () => {
     const finalOrg = orgId ?? undefined;
-    openEditor(year, month, finalOrg);
+    // 1) abrir popup
+    openPayrollPopup({ year, month, orgId: finalOrg });
+    // 2) crear en background
     createInBackground(year, month, finalOrg);
   };
 
@@ -168,8 +132,6 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     const params = new URLSearchParams(sp);
     params.set("year", String(y));
     if (orgId) params.set("orgId", orgId);
-    params.delete("month");
-    params.delete("editor");
     router.push(`${pathname}?${params.toString()}`);
   };
 
@@ -179,8 +141,6 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     params.set("year", String(year));
     if (id) params.set("orgId", id);
     else params.delete("orgId");
-    params.delete("month");
-    params.delete("editor");
     router.push(`${pathname}?${params.toString()}`);
   };
 
@@ -229,18 +189,16 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
         <Cta onClick={onCreate}>Crear nómina</Cta>
       </div>
 
-      {/* Modal para selección de organización si la API devuelve MULTI_ORG */}
+      {/* Selección de org cuando la API responde MULTI_ORG */}
       <OrgPickerModal
         open={pickerOpen}
         orgs={pickerData}
         onCancel={() => setPickerOpen(false)}
         onConfirm={(id) => {
           setPickerOpen(false);
-          // Reflejar org en URL
           chooseOrg(id);
-          // Reabrir/actualizar overlay y reintentar creación
-          openEditor(year, month, id);
-          createInBackground(year, month, id);
+          openPayrollPopup({ year, month, orgId: id }); // reabre con la org elegida
+          createInBackground(year, month, id);          // y reintenta la creación
         }}
       />
     </>
