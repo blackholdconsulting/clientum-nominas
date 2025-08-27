@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 const MONTHS = [
@@ -28,6 +28,9 @@ type Row = { id: string; month: number; status: string | null };
 export default function PayrollGrid({ year }: { year: number }) {
   const supabase = useMemo(() => supabaseBrowser(), []);
   const router = useRouter();
+  const sp = useSearchParams();
+  const orgId = sp.get("orgId");
+
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -55,19 +58,23 @@ export default function PayrollGrid({ year }: { year: number }) {
     return m;
   }, [rows]);
 
-  const create = async (m: number) => {
+  const create = async (month: number) => {
     const res = await fetch("/api/payroll/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       cache: "no-store",
-      body: JSON.stringify({ year, month: m }),
+      body: JSON.stringify({ year, month, orgId }),
     });
     const json = await res.json();
     if (!res.ok || !json.ok) {
       alert(json.error ?? "No se ha podido crear el período.");
     } else {
-      router.push(`/payroll?year=${year}&month=${m}`); // abre panel con editor (empleados a la izquierda)
+      const params = new URLSearchParams();
+      params.set("year", String(year));
+      params.set("month", String(month));
+      if (orgId) params.set("orgId", orgId);
+      router.push(`/payroll?${params.toString()}`); // abre panel editor
       router.refresh();
     }
   };
@@ -106,7 +113,13 @@ export default function PayrollGrid({ year }: { year: number }) {
 
                   {exists ? (
                     <button
-                      onClick={() => router.push(`/payroll?year=${year}&month=${m}`)}
+                      onClick={() => {
+                        const params = new URLSearchParams();
+                        params.set("year", String(year));
+                        params.set("month", String(m));
+                        if (orgId) params.set("orgId", orgId);
+                        router.push(`/payroll?${params.toString()}`);
+                      }}
                       className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
                       title="Abrir editor"
                     >
@@ -117,6 +130,7 @@ export default function PayrollGrid({ year }: { year: number }) {
                       onClick={() => create(m)}
                       className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
                       title="Crear y abrir editor"
+                      disabled={orgId === null && undefined} // si hay varias orgs y no eligió, se bloquea en la API igualmente
                     >
                       Crear nómina
                     </button>
