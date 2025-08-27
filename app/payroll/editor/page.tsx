@@ -1,84 +1,52 @@
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
 import EmployeesList from "@/components/payroll/EmployeesList";
-import Link from "next/link";
+import EmployeePayrollEditor from "@/components/payroll/EmployeePayrollEditor";
 
-type PageProps = { searchParams?: { year?: string; month?: string; employee?: string } };
-
-function getSupabaseServerSafe() {
-  try {
-    const cookieStore = cookies();
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    if (!url || !key) return null;
-    return createServerClient(url, key, {
-      cookies: {
-        get: (name: string) => cookieStore.get(name)?.value,
-        set: () => {},
-        remove: () => {},
-      },
-    });
-  } catch { return null; }
-}
-
-export default async function PayrollEditorPage({ searchParams }: PageProps) {
-  const year = Number(searchParams?.year ?? 0);
-  const month = Number(searchParams?.month ?? 0);
-
-  const supabase = getSupabaseServerSafe();
-  let period: any = null;
-  if (supabase) {
-    // Intento 1: year/month
-    let r = await supabase
-      .from("payrolls")
-      .select("id, status")
-      .eq("year", year)
-      .eq("month", month)
-      .maybeSingle();
-
-    if (r.error || !r.data) {
-      // Intento 2: period_year/period_month
-      r = await supabase
-        .from("payrolls")
-        .select("id, status")
-        .eq("period_year", year)
-        .eq("period_month", month)
-        .maybeSingle();
-    }
-    period = r.data ?? null;
-  }
+export default function PayrollEditorPage({
+  searchParams,
+}: {
+  searchParams?: { year?: string; month?: string; employee?: string; orgId?: string };
+}) {
+  const now = new Date();
+  const year = Number(searchParams?.year ?? now.getFullYear());
+  const month = Number(searchParams?.month ?? now.getMonth() + 1);
+  const employeeId = (searchParams?.employee ?? "").trim();
+  const orgId = (searchParams?.orgId ?? "").trim() || undefined;
 
   return (
-    <div className="flex h-full">
-      <aside className="w-[360px] shrink-0 border-r bg-white">
+    <div className="flex h-[100dvh] w-full bg-white">
+      {/* Columna izquierda: lista de empleados (multi-tenant con RLS) */}
+      <aside className="w-[360px] shrink-0 border-r">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
-            <div className="text-sm font-semibold text-gray-800">Empleados</div>
-            <div className="text-xs text-gray-500">Multi-tenant (RLS)</div>
+            <p className="text-sm font-semibold text-gray-800">Empleados</p>
+            <p className="text-xs text-gray-500">Multi-tenant (RLS)</p>
           </div>
           <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
             {String(month).padStart(2, "0")}/{year}
           </span>
         </div>
+
+        {/* La lista maneja la navegación (recarga esta página con ?employee=...) */}
         <EmployeesList year={year} month={month} />
       </aside>
 
-      <main className="flex flex-1 items-center justify-center bg-gray-50">
-        {period ? (
-          <div className="text-center text-sm text-gray-600">
-            Selecciona un empleado a la izquierda para editar su nómina y generar el PDF.
-          </div>
+      {/* Panel derecho: editor */}
+      <main className="flex-1">
+        {employeeId ? (
+          <EmployeePayrollEditor
+            year={year}
+            month={month}
+            employeeId={employeeId}
+            orgId={orgId}
+          />
         ) : (
-          <div className="text-center">
-            <p className="text-sm text-gray-600">No existe período <b>{month}/{year}</b>.</p>
-            <div className="mt-3">
-              <Link href={`/payroll?year=${year}`} className="text-xs text-gray-500 underline hover:text-gray-700">
-                Volver a Nóminas
-              </Link>
-            </div>
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-gray-600">
+              Selecciona un empleado a la izquierda para editar su nómina y generar el PDF.
+            </p>
           </div>
         )}
       </main>
