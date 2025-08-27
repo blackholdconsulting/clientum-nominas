@@ -3,24 +3,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import CreateMonthInlineButton from "@/components/payroll/CreateMonthInlineButton";
 
 const MONTHS = [
   "Enero","Febrero","Marzo","Abril","Mayo","Junio",
   "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
 ];
 
-function chip(status?: string | null) {
+function StatusChip({ status }: { status?: string | null }) {
   const map: Record<string, string> = {
     draft: "bg-gray-100 text-gray-700 border-gray-200",
     closed: "bg-amber-100 text-amber-800 border-amber-200",
     paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
   };
-  return `inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${map[status ?? "draft"] ?? map.draft}`;
-}
-function chipLabel(status?: string | null) {
-  const map: Record<string, string> = { draft: "Borrador", closed: "Cerrada", paid: "Pagada" };
-  return map[status ?? "draft"] ?? "Borrador";
+  const label: Record<string, string> = { draft: "Borrador", closed: "Cerrada", paid: "Pagada" };
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${map[status ?? "draft"]}`}>
+      {label[status ?? "draft"]}
+    </span>
+  );
 }
 
 type Row = { id: string; month: number; status: string | null };
@@ -55,48 +55,73 @@ export default function PayrollGrid({ year }: { year: number }) {
     return m;
   }, [rows]);
 
+  const create = async (m: number) => {
+    const res = await fetch("/api/payroll/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify({ year, month: m }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      alert(json.error ?? "No se ha podido crear el período.");
+    } else {
+      router.push(`/payroll?year=${year}&month=${m}`); // abre panel con editor (empleados a la izquierda)
+      router.refresh();
+    }
+  };
+
   return (
     <>
-      {loading ? (
-        <div className="text-sm text-gray-500">Cargando periodos…</div>
-      ) : err ? (
-        <div className="text-sm text-red-600">Error: {err}</div>
-      ) : null}
+      {loading ? <div className="text-sm text-gray-500">Cargando períodos…</div> : null}
+      {err ? <div className="text-sm text-red-600">Error: {err}</div> : null}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 12 }).map((_, i) => {
-          const month = i + 1;
-          const rec = byMonth.get(month) || null;
+          const m = i + 1;
+          const mm = String(m).padStart(2, "0");
+          const rec = byMonth.get(m) || null;
           const exists = !!rec;
-          const status = rec?.status ?? null;
-          const mm = String(month).padStart(2, "0");
 
           return (
-            <div key={month} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-gray-900">{MONTHS[i]}</div>
-                <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
-                  {mm}/{year}
-                </span>
-              </div>
-              <p className="mt-2 text-[13px] leading-5 text-gray-600">
-                Prepara, revisa y guarda las nóminas de tu equipo para este mes.
-              </p>
-
-              <div className="mt-3 flex items-center justify-between">
-                <div className="text-xs text-gray-500">
-                  {exists ? <span className={chip(status)}>{chipLabel(status)}</span> : "Sin nómina"}
+            <div key={m} className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#2563EB] to-[#1E40AF]" />
+              <div className="p-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[15px] font-semibold text-gray-900">{MONTHS[i]}</h3>
+                  <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
+                    {mm}/{year}
+                  </span>
                 </div>
-                {exists ? (
-                  <button
-                    onClick={() => router.push(`/payroll?year=${year}&month=${month}`)}
-                    className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50"
-                  >
-                    Editar nómina
-                  </button>
-                ) : (
-                  <CreateMonthInlineButton year={year} month={month} />
-                )}
+
+                <p className="mt-2 text-[13px] leading-5 text-gray-600">
+                  Prepara, revisa y guarda las nóminas de tu equipo para este mes.
+                </p>
+
+                <div className="mt-4 flex items-center justify-between">
+                  <div className="text-xs text-gray-500">
+                    {exists ? <StatusChip status={rec?.status} /> : "Sin nómina"}
+                  </div>
+
+                  {exists ? (
+                    <button
+                      onClick={() => router.push(`/payroll?year=${year}&month=${m}`)}
+                      className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
+                      title="Abrir editor"
+                    >
+                      Editar nómina
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => create(m)}
+                      className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
+                      title="Crear y abrir editor"
+                    >
+                      Crear nómina
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
