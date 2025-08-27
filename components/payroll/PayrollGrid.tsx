@@ -31,15 +31,16 @@ export default function PayrollGrid({ year }: { year: number }) {
   const supabase = useMemo(() => supabaseBrowser(), []);
   const router = useRouter();
   const sp = useSearchParams();
-  const currentOrgId = sp.get("orgId");
+  const urlOrgId = sp.get("orgId");
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // modal de organizaciones (fallback)
-  const [orgs, setOrgs] = useState<OrgOption[]>([]);
+  // modal
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerData, setPickerData] = useState<OrgOption[]>([]);
+  const [pendingMonth, setPendingMonth] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -64,48 +65,26 @@ export default function PayrollGrid({ year }: { year: number }) {
     return m;
   }, [rows]);
 
-  // Cargar orgs para modal bajo demanda
-  const loadOrgsIfNeeded = async (): Promise<OrgOption[]> => {
-    const { data: memberships } = await supabase.from("org_members").select("org_id").limit(10);
-    const ids = (memberships ?? []).map((m: any) => m.org_id).filter(Boolean);
-    let opts: OrgOption[] = ids.map((id: string) => ({ id, name: id.slice(0, 8) }));
-    if (ids.length) {
-      const { data: named } = await supabase.from("orgs").select("id,name").in("id", ids);
-      if (named && named.length) {
-        const map = new Map(named.map((r: any) => [r.id, r.name || r.id.slice(0, 8)]));
-        opts = ids.map((id: string) => ({ id, name: map.get(id) as string }));
-      }
-    }
-    setOrgs(opts);
-    return opts;
-  };
-
   const create = async (month: number, forcedOrgId?: string) => {
-    const orgId = forcedOrgId ?? currentOrgId;
+    const orgId = forcedOrgId ?? urlOrgId ?? undefined;
 
     const res = await fetch("/api/payroll/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       cache: "no-store",
-      body: JSON.stringify({ year, month, orgId: orgId ?? undefined }),
+      body: JSON.stringify({ year, month, orgId }),
     });
     const json = await res.json();
 
+    if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
+      setPendingMonth(month);
+      setPickerData(json.orgs as OrgOption[]);
+      setPickerOpen(true);
+      return;
+    }
+
     if (!res.ok || !json.ok) {
-      const msg = (json.error || "").toLowerCase();
-      if (msg.includes("varias organizaciones")) {
-        // Abrir modal para que el usuario elija
-        const opts = await loadOrgsIfNeeded();
-        if (opts.length > 1) {
-          setPickerOpen(true);
-          return;
-        }
-        if (opts.length === 1) {
-          // Autoselección si sólo hay 1 visible
-          return create(month, opts[0].id);
-        }
-      }
       alert(json.error ?? "No se ha podido crear el período.");
       return;
     }
@@ -156,11 +135,10 @@ export default function PayrollGrid({ year }: { year: number }) {
                         const params = new URLSearchParams();
                         params.set("year", String(year));
                         params.set("month", String(m));
-                        if (currentOrgId) params.set("orgId", currentOrgId);
+                        if (urlOrgId) params.set("orgId", urlOrgId);
                         router.push(`/payroll?${params.toString()}`);
                       }}
                       className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
-                      title="Abrir editor"
                     >
                       Editar nómina
                     </button>
@@ -168,7 +146,6 @@ export default function PayrollGrid({ year }: { year: number }) {
                     <button
                       onClick={() => create(m)}
                       className="inline-flex items-center rounded-xl border border-[#2563EB]/30 bg-white px-3 py-2 text-sm font-medium text-[#1E3A8A] shadow-sm hover:bg-[#EFF6FF]"
-                      title="Crear y abrir editor"
                     >
                       Crear nómina
                     </button>
@@ -180,22 +157,19 @@ export default function PayrollGrid({ year }: { year: number }) {
         })}
       </div>
 
-      {/* Modal organización (fallback) */}
       <OrgPickerModal
         open={pickerOpen}
-        orgs={orgs}
+        orgs={pickerData}
         onCancel={() => setPickerOpen(false)}
         onConfirm={(id) => {
           setPickerOpen(false);
-          // guardamos orgId en la URL y reintentamos
           const params = new URLSearchParams(sp);
           params.set("year", String(year));
           params.set("orgId", id);
+          // reflejar selección en URL
           router.replace(`/payroll?${params.toString()}`);
-          // damos un tick y creamos con ese id
-          setTimeout(() => {
-            create(Number(sp.get("month") || 0) || new Date().getMonth() + 1, id);
-          }, 0);
+          // reintentar creación con la organización elegida
+          if (pendingMonth) create(pendingMonth, id);
         }}
       />
     </>
