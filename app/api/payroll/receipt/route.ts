@@ -24,11 +24,26 @@ export async function POST(req: Request) {
     const orgId: string | undefined = body?.orgId || undefined;
     const upload: boolean = !!body?.upload;
 
+    // ✅ NUEVO: API recomendada (get, set, remove)
     const cookieStore = cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      { cookies: () => cookieStore }
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value;
+          },
+          set(name: string, value: string, options?: any) {
+            // En Route Handlers se puede escribir cookies
+            cookieStore.set({ name, value, ...options });
+          },
+          remove(name: string, options?: any) {
+            // Eliminamos la cookie sobrescribiendo
+            cookieStore.set({ name, value: "", ...options });
+          },
+        },
+      }
     );
 
     // 1) Empleado
@@ -76,7 +91,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3) Datos para la plantilla
+    // 3) Datos para la plantilla PDF
     const input: ReceiptInput = {
       company: {
         name: "Clientum (demo)",
@@ -92,15 +107,8 @@ export async function POST(req: Request) {
         ssn: "12/34567890/01",
         group: "07",
       },
-      period: {
-        year,
-        month,
-        label: monthLabel(year, month),
-      },
-      payroll: {
-        status,
-        daysInPeriod: days_in_period,
-      },
+      period: { year, month, label: monthLabel(year, month) },
+      payroll: { status, daysInPeriod: days_in_period },
       totals: {
         devengos: 1500,
         deducciones: 300,
@@ -118,7 +126,7 @@ export async function POST(req: Request) {
       ],
     };
 
-    // 4) Generar PDF SIN JSX (válido en .ts)
+    // 4) Generar PDF (sin JSX para .ts)
     const element = React.createElement(ReceiptPDF, input);
     const buffer = await pdf(element).toBuffer();
 
@@ -144,7 +152,9 @@ export async function POST(req: Request) {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="recibo_${year}_${String(month).padStart(2, "0")}.pdf"`,
+        "Content-Disposition": `inline; filename="recibo_${year}_${String(
+          month
+        ).padStart(2, "0")}.pdf"`,
         ...(publicUrl ? { "X-File-Url": publicUrl } : {}),
       },
     });
