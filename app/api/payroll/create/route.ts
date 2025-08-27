@@ -25,35 +25,29 @@ export async function POST(req: NextRequest) {
     const year = Number(body?.year);
     const month = Number(body?.month);
     const providedOrgId: string | null = body?.orgId ?? null;
-
     if (!year || !month || month < 1 || month > 12) {
       return NextResponse.json({ ok: false, error: "Parámetros inválidos (year/month)." }, { status: 400 });
     }
 
     const supabase = supabaseServer();
 
-    // ¿ya existe?
-    const { data: existing, error: exErr } = await supabase
+    // ¿Existe ya?
+    const { data: existing } = await supabase
       .from("payrolls")
       .select("id")
       .eq("year", year)
       .eq("month", month)
       .limit(1);
-    if (exErr) throw new Error(exErr.message);
     if (existing && existing.length > 0) {
       return NextResponse.json({ ok: true, id: existing[0].id, created: false });
     }
 
-    // org_id (si user tiene una única org, úsala)
+    // org_id (si solo hay una org para el usuario actual)
     let orgId = providedOrgId;
     if (!orgId) {
-      const { data: memberships, error: memErr } = await supabase
-        .from("org_members")
-        .select("org_id")
-        .limit(2);
-      if (memErr) throw new Error(memErr.message);
+      const { data: memberships } = await supabase.from("org_members").select("org_id").limit(2);
       if ((memberships ?? []).length === 1) orgId = memberships![0].org_id as string;
-      if (!orgId && (memberships ?? []).length !== 1) {
+      else if (!orgId) {
         return NextResponse.json({ ok: false, error: "Varias organizaciones: proporciona orgId." }, { status: 400 });
       }
     }
