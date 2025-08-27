@@ -38,7 +38,7 @@ export default function EmployeePayrollEditor({
   const [period, setPeriod] = useState<PayrollRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [pdfLoading, setPdfLoading] = useState(false);
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -46,6 +46,7 @@ export default function EmployeePayrollEditor({
       setLoading(true);
       setErr(null);
 
+      // 1) Empleado
       const { data: emp, error: e1 } = await supabase
         .from("employees")
         .select("id, full_name, first_name, last_name, email, position")
@@ -60,6 +61,7 @@ export default function EmployeePayrollEditor({
       }
       setEmployee(emp as Employee);
 
+      // 2) Periodo (por year/month o period_year/period_month)
       let per: PayrollRow | null = null;
 
       const q1 = await supabase
@@ -93,40 +95,27 @@ export default function EmployeePayrollEditor({
     (employee?.full_name ??
       [employee?.first_name, employee?.last_name].filter(Boolean).join(" ")) || "Empleado";
 
-  // TEMP: Generar PDF contra la ruta mínima
-  const handleGeneratePdf = async () => {
+  // === ABRIR DIRECTO EN PESTAÑA NUEVA ===
+  // Construimos la URL con querystring y abrimos _blank
+  const handleOpenPdf = () => {
+    setOpening(true);
     try {
-      setPdfLoading(true);
-      const res = await fetch("/api/payroll/receipt-min", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          year,
-          month,
-          employeeName: displayName,
-          status: period?.status ?? "borrador",
-          liquido: 1200,
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error || "No se pudo generar el PDF");
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      // Intentar abrir en pestaña nueva
-      const w = window.open(url, "_blank");
-      if (!w) {
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener";
-        a.click();
-      }
-    } catch (e: any) {
-      alert(e?.message || "Error al generar PDF");
+      const url = new URL("/api/payroll/receipt-raw", window.location.origin);
+      url.searchParams.set("year", String(year));
+      url.searchParams.set("month", String(month));
+      url.searchParams.set("employeeName", displayName);
+      url.searchParams.set("status", period?.status ?? "borrador");
+
+      // Puedes reemplazar estos valores con cálculos reales:
+      url.searchParams.set("devengos", String(1500));
+      url.searchParams.set("deducciones", String(300));
+      url.searchParams.set("liquido", String(1200));
+
+      window.open(url.toString(), "_blank", "noopener");
+    } catch (e) {
+      alert("No se pudo abrir el PDF");
     } finally {
-      setPdfLoading(false);
+      setOpening(false);
     }
   };
 
@@ -160,18 +149,19 @@ export default function EmployeePayrollEditor({
             {String(month).padStart(2, "0")}/{year}
           </span>
           <button
-            onClick={handleGeneratePdf}
-            disabled={pdfLoading}
+            onClick={handleOpenPdf}
+            disabled={opening}
             className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
           >
-            {pdfLoading ? "Generando..." : "Generar PDF"}
+            {opening ? "Generando…" : "Generar PDF"}
           </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
         <p className="text-sm text-gray-600">
-          Selecciona el empleado y pulsa “Generar PDF”. Ahora usa la ruta mínima para validar flujo.
+          Selecciona un empleado y usa “Generar PDF”. Se abrirá en una pestaña nueva con la ruta
+          <code className="ml-1 rounded bg-gray-100 px-1 py-0.5">/api/payroll/receipt-raw</code>.
         </p>
       </div>
     </div>
