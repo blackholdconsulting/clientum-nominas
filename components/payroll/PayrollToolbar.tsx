@@ -52,36 +52,27 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
   const [year, setYear] = useState<number>(defaultYear ?? now.getFullYear());
   const [month, setMonth] = useState<number>(now.getMonth() + 1);
 
-  const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [orgId, setOrgId] = useState<string | null>(sp.get("orgId"));
+  const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerData, setPickerData] = useState<OrgOption[]>([]); // orgs de la API para el modal
 
-  // 1) Cargar organizaciones del usuario (sin depender de tabla orgs para el nombre)
+  // Cargar orgs (para selector en toolbar y autoselección si hay una sola)
   useEffect(() => {
     let alive = true;
     (async () => {
-      const { data: memberships } = await supabase
-        .from("org_members")
-        .select("org_id")
-        .limit(10);
+      const { data: memberships } = await supabase.from("org_members").select("org_id").limit(10);
       const ids = (memberships ?? []).map((m: any) => m.org_id).filter(Boolean);
-      if (!alive) return;
-
-      // Intentamos nombres en orgs; si falla, usamos el id recortado
       let options: OrgOption[] = ids.map((id: string) => ({ id, name: id.slice(0, 8) }));
       if (ids.length) {
-        const { data: named } = await supabase
-          .from("orgs")
-          .select("id,name")
-          .in("id", ids);
+        const { data: named } = await supabase.from("orgs").select("id,name").in("id", ids);
         if (named && named.length) {
           const map = new Map(named.map((r: any) => [r.id, r.name || r.id.slice(0, 8)]));
           options = ids.map((id: string) => ({ id, name: map.get(id) as string }));
         }
       }
+      if (!alive) return;
       setOrgs(options);
-
-      // Autoselección si solo hay 1 y no hay orgId en la URL
       if (!orgId && options.length === 1) {
         setOrgId(options[0].id);
         const params = new URLSearchParams(sp);
@@ -94,17 +85,15 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
-  // 2) Navegar año manteniendo orgId
   const goYear = (y: number) => {
     setYear(y);
     const params = new URLSearchParams(sp);
     params.set("year", String(y));
     if (orgId) params.set("orgId", orgId);
-    params.delete("month"); // cerramos overlay
+    params.delete("month");
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  // 3) Elegir org en toolbar
   const chooseOrg = (id: string | null) => {
     setOrgId(id);
     const params = new URLSearchParams(sp);
@@ -115,54 +104,43 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  // 4) Crear y abrir — con fallback: si no hay orgId y hay varias, abrimos modal
   const createAndOpen = async (forcedOrgId?: string) => {
-    const finalOrgId = forcedOrgId ?? orgId;
-
-    if (!finalOrgId) {
-      // Si hay varias, mostrar modal
-      if (orgs.length > 1) {
-        setPickerOpen(true);
-        return;
-      }
-      // Si hay 1, usarla
-      if (orgs.length === 1) {
-        return createAndOpen(orgs[0].id);
-      }
-    }
+    const finalOrg = forcedOrgId ?? orgId ?? undefined;
 
     const res = await fetch("/api/payroll/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       cache: "no-store",
-      body: JSON.stringify({ year, month, orgId: finalOrgId ?? undefined }),
+      body: JSON.stringify({ year, month, orgId: finalOrg }),
     });
     const json = await res.json();
-    if (!res.ok || !json.ok) {
-      // Fallback: si la API devuelve “Varias organizaciones…”, forzamos modal
-      if ((json.error || "").toLowerCase().includes("varias organizaciones")) {
-        setPickerOpen(true);
-        return;
-      }
-      alert(json.error ?? "No se ha podido crear la nómina.");
-    } else {
-      const params = new URLSearchParams();
-      params.set("year", String(year));
-      params.set("month", String(month));
-      if (finalOrgId) params.set("orgId", finalOrgId);
-      router.push(`${pathname}?${params.toString()}`);
-      router.refresh();
+
+    // Si la API devuelve MULTI_ORG, abrimos modal con la lista que viene del servidor
+    if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
+      setPickerData(json.orgs as OrgOption[]);
+      setPickerOpen(true);
+      return;
     }
+
+    if (!res.ok || !json.ok) {
+      alert(json.error ?? "No se ha podido crear la nómina.");
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("year", String(year));
+    params.set("month", String(month));
+    if (finalOrg) params.set("orgId", finalOrg);
+    router.push(`${pathname}?${params.toString()}`);
+    router.refresh();
   };
 
   return (
     <>
       <div className="flex items-center gap-2">
-        {/* Volver al dashboard */}
         <GhostLink href="/dashboard">Dashboard</GhostLink>
 
-        {/* Selector de organización si hay más de una */}
         {orgs.length > 1 && (
           <select
             value={orgId ?? ""}
@@ -179,16 +157,13 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
           </select>
         )}
 
-        {/* Mes / Año */}
         <select
           value={month}
           onChange={(e) => setMonth(Number(e.target.value))}
           className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
         >
           {MONTHS.map((m, i) => (
-            <option key={i + 1} value={i + 1}>
-              {m}
-            </option>
+            <option key={i + 1} value={i + 1}>{m}</option>
           ))}
         </select>
         <input
@@ -198,18 +173,18 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
           className="w-[92px] rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
         />
 
-        <Cta onClick={() => createAndOpen()}>{/* busy lo gestiona la navegación */}Crear nómina</Cta>
+        <Cta onClick={() => createAndOpen()}>Crear nómina</Cta>
       </div>
 
-      {/* Modal de selección de organización (fallback robusto) */}
       <OrgPickerModal
         open={pickerOpen}
-        orgs={orgs}
+        orgs={pickerData}
         onCancel={() => setPickerOpen(false)}
         onConfirm={(id) => {
           setPickerOpen(false);
-          chooseOrg(id);          // guardamos en URL
-          createAndOpen(id);      // y creamos con esa org
+          // guardamos orgId en URL y reintentamos creación
+          chooseOrg(id);
+          createAndOpen(id);
         }}
       />
     </>
