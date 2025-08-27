@@ -1,4 +1,3 @@
-// app/api/payroll/receipt/route.tsx
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -8,8 +7,8 @@ import ReceiptPDF, { ReceiptInput } from "@/lib/pdf/payroll/Receipt";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-// Si quieres subirlo a Storage, define el bucket
-const BUCKET = "nominas"; // crea el bucket y ponlo "private"
+// Bucket (opcional) para subir el PDF
+const BUCKET = "nominas";
 
 function monthLabel(year: number, month: number) {
   const d = new Date(year, month - 1, 1);
@@ -32,7 +31,7 @@ export async function POST(req: Request) {
       { cookies: () => cookieStore }
     );
 
-    // 1) Datos del empleado
+    // 1) Empleado
     let empName = "Empleado";
     let email = "";
     let position = "";
@@ -50,7 +49,7 @@ export async function POST(req: Request) {
       position = emp?.position ?? "";
     }
 
-    // 2) Periodo (acepta year/month o period_year/period_month)
+    // 2) Período (year/month o period_year/period_month)
     let status: string | null = null;
     let days_in_period: number | null = null;
 
@@ -119,8 +118,9 @@ export async function POST(req: Request) {
       ],
     };
 
-    // 4) Generar PDF (JSX OK porque es .tsx)
-    const buffer = await pdf(<ReceiptPDF {...input} />).toBuffer();
+    // 4) Generar PDF SIN JSX (válido en .ts)
+    const element = React.createElement(ReceiptPDF, input);
+    const buffer = await pdf(element).toBuffer();
 
     // 5) (Opcional) Subir a Storage
     let publicUrl: string | null = null;
@@ -139,6 +139,7 @@ export async function POST(req: Request) {
       }
     }
 
+    // 6) Respuesta PDF
     return new Response(buffer, {
       status: 200,
       headers: {
@@ -149,6 +150,9 @@ export async function POST(req: Request) {
     });
   } catch (e: any) {
     console.error(e);
-    return Response.json({ error: e?.message ?? "Error generando el PDF" }, { status: 500 });
+    return Response.json(
+      { error: e?.message ?? "Error generando el PDF" },
+      { status: 500 }
+    );
   }
 }
