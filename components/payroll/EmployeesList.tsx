@@ -23,7 +23,7 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
   const [err, setErr] = useState<string | null>(null);
   const [term, setTerm] = useState("");
 
-  // Cargar empleados (RLS se encarga del multi-tenant)
+  // Cargar empleados (RLS multi-tenant)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -41,20 +41,19 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
       else setEmployees((data as Employee[]) ?? []);
       setLoading(false);
     })();
-    return () => {
-      alive = false;
-    };
+
+    return () => { alive = false; };
   }, [supabase]);
 
-  // Filtro simple por nombre/email/puesto
+  // Filtro local
   const filtered = useMemo(() => {
     const q = term.trim().toLowerCase();
     if (!q) return employees;
     return employees.filter((e) => {
       const name =
-        (e.full_name ??
-          [e.first_name, e.last_name].filter(Boolean).join(" ")) || // () para mezclar ?? con ||
-        "Empleado";
+        ((e.full_name ??
+          [e.first_name, e.last_name].filter(Boolean).join(" ")) || // paréntesis para mezclar ?? con ||
+          "Empleado");
       return (
         name.toLowerCase().includes(q) ||
         (e.email ?? "").toLowerCase().includes(q) ||
@@ -63,14 +62,17 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
     });
   }, [employees, term]);
 
-  // Abrir en overlay el editor para este empleado (actualizamos la URL base /payroll)
+  // Abrir nómina de un empleado DENTRO del iframe (ruta /payroll/editor)
   const openEmployee = (empId: string) => {
-    const params = new URLSearchParams(sp);
+    const orgId = sp.get("orgId");
+    const params = new URLSearchParams();
     params.set("year", String(year));
     params.set("month", String(month));
-    params.set("editor", "1"); // asegura overlay abierto
     params.set("employee", empId);
-    router.push(`/payroll?${params.toString()}`);
+    if (orgId) params.set("orgId", orgId);
+
+    // IMPORTANTE: navegamos a /payroll/editor (NO a /payroll) para evitar overlay-anidado
+    router.push(`/payroll/editor?${params.toString()}`);
     router.refresh();
   };
 
@@ -95,9 +97,7 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
         />
       </div>
 
-      {loading && (
-        <div className="px-4 pb-3 text-sm text-gray-500">Cargando empleados…</div>
-      )}
+      {loading && <div className="px-4 pb-3 text-sm text-gray-500">Cargando empleados…</div>}
       {err && <div className="px-4 pb-3 text-sm text-red-600">Error: {err}</div>}
 
       <div className="flex-1 overflow-y-auto">
