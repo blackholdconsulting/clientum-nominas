@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 type Props = { year: number; month: number };
-
 type Employee = {
   id: string;
   first_name?: string | null;
@@ -24,24 +23,16 @@ export default function EmployeesList({ year, month }: Props) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      setLoading(true);
-      setErr(null);
-
-      // Solo seleccionamos columnas reales (no usamos "name")
+      setLoading(true); setErr(null);
       const { data, error } = await supabase
         .from("employees")
         .select("id, first_name, last_name, full_name, email, position")
         .order("first_name", { ascending: true });
-
       if (!alive) return;
-      if (error) {
-        setErr(error.message);
-      } else {
-        setList((data ?? []) as Employee[]);
-      }
+      if (error) setErr(error.message);
+      else setList((data ?? []) as Employee[]);
       setLoading(false);
     })();
-
     return () => { alive = false; };
   }, [supabase]);
 
@@ -49,16 +40,11 @@ export default function EmployeesList({ year, month }: Props) {
     const t = term.trim().toLowerCase();
     if (!t) return list;
     return list.filter((e) => {
-      const safeFull =
-        (e.full_name !== null && e.full_name !== undefined ? e.full_name : "") as string;
-      const safeName =
-        safeFull && safeFull.length > 0
-          ? safeFull
-          : [e.first_name ?? "", e.last_name ?? ""].filter(Boolean).join(" ");
-      const email = (e.email ?? "") as string;
-      const pos = (e.position ?? "") as string;
-      const haystack = `${safeName} ${email} ${pos}`.toLowerCase();
-      return haystack.includes(t);
+      const full = (e.full_name ?? "").toLowerCase();
+      const name = full || [e.first_name ?? "", e.last_name ?? ""].join(" ").toLowerCase();
+      const email = (e.email ?? "").toLowerCase();
+      const pos = (e.position ?? "").toLowerCase();
+      return `${name} ${email} ${pos}`.includes(t);
     });
   }, [list, term]);
 
@@ -73,20 +59,15 @@ export default function EmployeesList({ year, month }: Props) {
         />
       </div>
 
-      {loading ? (
-        <div className="px-3 pb-3 text-xs text-gray-500">Cargando empleados…</div>
-      ) : err ? (
-        <div className="px-3 pb-3 text-xs text-red-600">Error: {err}</div>
-      ) : filtered.length === 0 ? (
-        <div className="px-3 pb-3 text-xs text-gray-500">Sin resultados.</div>
-      ) : null}
+      {loading && <div className="px-3 pb-3 text-xs text-gray-500">Cargando empleados…</div>}
+      {err && <div className="px-3 pb-3 text-xs text-red-600">Error: {err}</div>}
+      {!loading && !err && filtered.length === 0 && <div className="px-3 pb-3 text-xs text-gray-500">Sin resultados.</div>}
 
       <ul className="flex-1 divide-y overflow-auto">
         {filtered.map((e) => {
-          const composed =
-            (e.full_name && e.full_name.length > 0
-              ? e.full_name
-              : [e.first_name ?? "", e.last_name ?? ""].filter(Boolean).join(" ")) || "Empleado";
+          const composed = e.full_name && e.full_name.length
+            ? e.full_name
+            : [e.first_name ?? "", e.last_name ?? ""].filter(Boolean).join(" ") || "Empleado";
           return (
             <li key={e.id}>
               <a
@@ -98,7 +79,7 @@ export default function EmployeesList({ year, month }: Props) {
                     <div className="text-sm font-medium text-gray-800">{composed}</div>
                     <p className="text-xs text-gray-500">{e.email ?? "—"}{e.position ? ` · ${e.position}` : ""}</p>
                   </div>
-                  <span className="text-[11px] text-blue-600">Ver nómina →</span>
+                  <span className="text-[11px] font-medium text-[#1E40AF]">Ver nómina →</span>
                 </div>
               </a>
             </li>
