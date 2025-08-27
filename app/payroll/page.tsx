@@ -1,161 +1,45 @@
-// Forzamos render dinámico y sin cache para evitar errores de RSC con cookies/Supabase
+// Render dinámico (sin caché) — no consultamos Supabase en server aquí
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import Link from "next/link";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+import CreatePeriodButton from "@/components/payroll/CreatePeriodButton";
+import PayrollGrid from "@/components/payroll/PayrollGrid";
 
 type PageProps = {
   searchParams?: Record<string, string | string[] | undefined>;
 };
 
-function getSupabaseServerSafe() {
-  try {
-    const cookieStore = cookies();
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    if (!url || !key) return null;
-    return createServerClient(url, key, {
-      cookies: {
-        get: (name: string) => cookieStore.get(name)?.value,
-        set: () => {},
-        remove: () => {},
-      },
-    });
-  } catch {
-    return null;
-  }
-}
-
-const MONTHS = [
-  "Enero","Febrero","Marzo","Abril","Mayo","Junio",
-  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
-];
-
-function chip(status?: string | null) {
-  const map: Record<string, string> = {
-    draft: "bg-gray-100 text-gray-700 border-gray-200",
-    closed: "bg-amber-100 text-amber-800 border-amber-200",
-    paid: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  };
-  return `inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${map[status ?? "draft"] ?? map.draft}`;
-}
-function chipLabel(status?: string | null) {
-  const map: Record<string, string> = { draft: "Borrador", closed: "Cerrada", paid: "Pagada" };
-  return map[status ?? "draft"] ?? "Borrador";
-}
-
-export default async function PayrollPage({ searchParams }: PageProps) {
+export default function PayrollPage({ searchParams }: PageProps) {
   const now = new Date();
   const selectedYear = Number(
     typeof searchParams?.year === "string" ? searchParams.year : now.getFullYear()
   );
   const openMonth = Number(typeof searchParams?.month === "string" ? searchParams.month : 0);
 
-  // --- Carga segura de periodos (si Supabase falla, seguimos con lista vacía)
-  const supabase = getSupabaseServerSafe();
-  let rows: Array<{ id: string; year: number; month: number; status: string | null }> = [];
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from("payrolls")
-        .select("id, year, month, status")
-        .eq("year", selectedYear);
-      if (!error && data) rows = data as any;
-    } catch {
-      // ignore
-    }
-  }
-
-  const byMonth = new Map<number, { id: string; status: string | null }>();
-  for (const r of rows) byMonth.set(r.month, { id: r.id, status: r.status ?? "draft" });
-
   return (
     <div className="flex h-[calc(100vh-0px)]">
-      {/* Columna izquierda: grid de meses (estilo clásico) */}
+      {/* Columna izquierda: grid de meses */}
       <div className="w-full max-w-[880px] flex-1 border-r bg-white">
         <div className="flex items-center justify-between px-6 pt-6">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Gestión de Nóminas</h1>
-            <p className="text-xs text-gray-500">Selecciona un período para preparar las nóminas de tu equipo.</p>
+            <p className="text-xs text-gray-500">
+              Selecciona un período para preparar las nóminas de tu equipo.
+            </p>
           </div>
-          <Link
-            href={`/payroll?year=${selectedYear}&month=${now.getMonth() + 1}`}
-            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50"
-            title="Abrir el mes actual"
-          >
-            Abrir mes actual
-          </Link>
+
+        {/* Botón global (cliente) */}
+          <CreatePeriodButton defaultYear={selectedYear} />
         </div>
 
         <div className="px-6 pb-8 pt-5">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 12 }).map((_, i) => {
-              const month = i + 1;
-              const rec = byMonth.get(month) || null;
-              const exists = !!rec;
-              const status = rec?.status ?? null;
-              const mm = String(month).padStart(2, "0");
-
-              return (
-                <div key={month} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-900">{MONTHS[i]}</div>
-                    <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
-                      {mm}/{selectedYear}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-[13px] leading-5 text-gray-600">
-                    Prepara, revisa y guarda las nóminas de tu equipo para este mes.
-                  </p>
-
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="text-xs text-gray-500">
-                      {exists ? <span className={chip(status)}>{chipLabel(status)}</span> : "Sin nómina"}
-                    </div>
-                    {exists ? (
-                      <Link
-                        href={`/payroll?year=${selectedYear}&month=${month}`}
-                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50"
-                      >
-                        Editar nómina
-                      </Link>
-                    ) : (
-                      <button
-                        onClick={async () => {
-                          try {
-                            const res = await fetch("/api/payroll/create", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              credentials: "same-origin",
-                              cache: "no-store",
-                              body: JSON.stringify({ year: selectedYear, month }),
-                            });
-                            const json = await res.json();
-                            if (res.ok && json.ok) {
-                              location.href = `/payroll?year=${selectedYear}&month=${month}`;
-                            } else {
-                              alert(json.error ?? "No se ha podido crear el período.");
-                            }
-                          } catch (e: any) {
-                            alert(e?.message ?? "Error de red creando la nómina.");
-                          }
-                        }}
-                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-50"
-                      >
-                        Crear nómina
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {/* Grid en cliente: consulta Supabase con RLS */}
+          <PayrollGrid year={selectedYear} />
         </div>
       </div>
 
-      {/* Panel lateral con iframe del editor */}
+      {/* Panel lateral con el editor embebido (mantiene UX original) */}
       <div
         className={`relative h-full w-[0px] overflow-hidden transition-all duration-200 ${
           openMonth ? "w-[min(900px,50vw)] border-l" : ""
@@ -184,4 +68,3 @@ export default async function PayrollPage({ searchParams }: PageProps) {
     </div>
   );
 }
-
