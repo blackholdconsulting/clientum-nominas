@@ -57,7 +57,6 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerData, setPickerData] = useState<OrgOption[]>([]);
 
-  // Cargar organizaciones
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -113,27 +112,36 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     router.refresh();
   };
 
+  // Crear: navegar primero, crear en background
   const createAndOpen = async (forcedOrgId?: string) => {
     const finalOrg = forcedOrgId ?? orgId ?? undefined;
 
-    const res = await fetch("/api/payroll/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      cache: "no-store",
-      body: JSON.stringify({ year, month, orgId: finalOrg }),
-    });
-    const json = await res.json();
-
-    if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
-      setPickerData(json.orgs as OrgOption[]);
-      setPickerOpen(true);
-      return;
-    }
-
-    // Abra siempre el editor: si ya existía o incluso si falló, la UI lo indicará.
+    // 1) Abrimos el editor inmediatamente
     openEditor(year, month, finalOrg);
-    if (!res.ok && json?.error) console.warn("Crear nómina:", json.error);
+
+    // 2) Pedimos creación en segundo plano
+    try {
+      const res = await fetch("/api/payroll/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ year, month, orgId: finalOrg }),
+      });
+      const json = await res.json();
+
+      if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
+        setPickerData(json.orgs as OrgOption[]);
+        setPickerOpen(true);
+        return;
+      }
+
+      if (!res.ok && json?.error) {
+        console.warn("Crear nómina (toolbar bg):", json.error);
+      }
+    } catch (e) {
+      console.warn("Crear nómina (toolbar bg):", e);
+    }
   };
 
   return (
@@ -173,7 +181,9 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
           className="w-[92px] rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
         />
 
-        <Cta onClick={() => createAndOpen()}>Crear nómina</Cta>
+        <Cta type="button" onClick={() => createAndOpen()}>
+          Crear nómina
+        </Cta>
       </div>
 
       <OrgPickerModal
@@ -183,7 +193,19 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
         onConfirm={(id) => {
           setPickerOpen(false);
           chooseOrg(id);
-          createAndOpen(id);
+          // Reabrimos (por si el usuario cambió de mes) y creamos en bg con la org elegida
+          openEditor(year, month, id);
+          (async () => {
+            try {
+              await fetch("/api/payroll/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                cache: "no-store",
+                body: JSON.stringify({ year, month, orgId: id }),
+              });
+            } catch {}
+          })();
         }}
       />
     </>
