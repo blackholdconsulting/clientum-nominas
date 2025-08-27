@@ -29,7 +29,6 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
     (async () => {
       setLoading(true);
       setErr(null);
-
       const { data, error } = await supabase
         .from("employees")
         .select("id, full_name, first_name, last_name, email, position")
@@ -41,19 +40,18 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
       else setEmployees((data as Employee[]) ?? []);
       setLoading(false);
     })();
-
     return () => { alive = false; };
   }, [supabase]);
 
-  // Filtro local
+  // Búsqueda local
   const filtered = useMemo(() => {
     const q = term.trim().toLowerCase();
     if (!q) return employees;
     return employees.filter((e) => {
       const name =
-        ((e.full_name ??
-          [e.first_name, e.last_name].filter(Boolean).join(" ")) || // paréntesis para mezclar ?? con ||
-          "Empleado");
+        (e.full_name ??
+          [e.first_name, e.last_name].filter(Boolean).join(" ")) ||
+        "Empleado"; // () para mezclar ?? con ||
       return (
         name.toLowerCase().includes(q) ||
         (e.email ?? "").toLowerCase().includes(q) ||
@@ -71,7 +69,7 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
     params.set("employee", empId);
     if (orgId) params.set("orgId", orgId);
 
-    // IMPORTANTE: navegamos a /payroll/editor (NO a /payroll) para evitar overlay-anidado
+    // MUY IMPORTANTE: navegamos dentro del iframe a /payroll/editor (NO a /payroll)
     router.push(`/payroll/editor?${params.toString()}`);
     router.refresh();
   };
@@ -109,22 +107,25 @@ export default function EmployeesList({ year, month }: { year: number; month: nu
               const name =
                 (e.full_name ??
                   [e.first_name, e.last_name].filter(Boolean).join(" ")) || "Empleado";
+              const subtitle = [e.email ?? "", e.position ?? ""].filter(Boolean).join(" · ");
               return (
-                <li key={e.id} className="group flex items-center justify-between px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-gray-900">{name}</p>
-                    <p className="truncate text-xs text-gray-500">
-                      {e.email ?? "—"}{" "}
-                      {e.position ? <span className="text-gray-400">· {e.position}</span> : null}
-                    </p>
-                  </div>
+                <li key={e.id}>
+                  {/* Toda la fila es clicable */}
                   <button
                     type="button"
                     onClick={() => openEmployee(e.id)}
-                    className="whitespace-nowrap text-[12px] font-medium text-blue-700 opacity-0 transition group-hover:opacity-100"
+                    className="group block w-full px-4 py-3 text-left hover:bg-gray-50 focus:bg-gray-50"
                     title="Abrir nómina del empleado"
                   >
-                    Ver nómina →
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-gray-900">{name}</p>
+                        <p className="truncate text-xs text-gray-500">{subtitle || "—"}</p>
+                      </div>
+                      <span className="ml-3 shrink-0 text-[12px] font-medium text-blue-700">
+                        Ver nómina →
+                      </span>
+                    </div>
                   </button>
                 </li>
               );
