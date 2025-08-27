@@ -55,9 +55,9 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
   const [orgId, setOrgId] = useState<string | null>(sp.get("orgId"));
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerData, setPickerData] = useState<OrgOption[]>([]); // orgs de la API para el modal
+  const [pickerData, setPickerData] = useState<OrgOption[]>([]);
 
-  // Cargar orgs (para selector en toolbar y autoselección si hay una sola)
+  // Cargar organizaciones
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -104,6 +104,15 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     router.push(`${pathname}?${params.toString()}`);
   };
 
+  const openEditor = (y: number, m: number, org?: string | null) => {
+    const params = new URLSearchParams();
+    params.set("year", String(y));
+    params.set("month", String(m));
+    if (org) params.set("orgId", org);
+    router.push(`${pathname}?${params.toString()}`);
+    router.refresh();
+  };
+
   const createAndOpen = async (forcedOrgId?: string) => {
     const finalOrg = forcedOrgId ?? orgId ?? undefined;
 
@@ -116,24 +125,15 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
     });
     const json = await res.json();
 
-    // Si la API devuelve MULTI_ORG, abrimos modal con la lista que viene del servidor
     if (res.status === 409 && json.code === "MULTI_ORG" && Array.isArray(json.orgs)) {
       setPickerData(json.orgs as OrgOption[]);
       setPickerOpen(true);
       return;
     }
 
-    if (!res.ok || !json.ok) {
-      alert(json.error ?? "No se ha podido crear la nómina.");
-      return;
-    }
-
-    const params = new URLSearchParams();
-    params.set("year", String(year));
-    params.set("month", String(month));
-    if (finalOrg) params.set("orgId", finalOrg);
-    router.push(`${pathname}?${params.toString()}`);
-    router.refresh();
+    // Abra siempre el editor: si ya existía o incluso si falló, la UI lo indicará.
+    openEditor(year, month, finalOrg);
+    if (!res.ok && json?.error) console.warn("Crear nómina:", json.error);
   };
 
   return (
@@ -182,7 +182,6 @@ export default function PayrollToolbar({ defaultYear }: { defaultYear: number })
         onCancel={() => setPickerOpen(false)}
         onConfirm={(id) => {
           setPickerOpen(false);
-          // guardamos orgId en URL y reintentamos creación
           chooseOrg(id);
           createAndOpen(id);
         }}
