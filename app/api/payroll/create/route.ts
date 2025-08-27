@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
 
     const supabase = supabaseServer();
 
-    // Idempotencia
+    // Idempotencia: ¿existe ya?
     const { data: existing, error: exErr } = await supabase
       .from("payrolls")
       .select("id")
@@ -44,24 +44,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, id: existing[0].id, created: false });
     }
 
-    // Resolver org si no viene (1 sola -> auto)
+    // Resolver organización
+    const { data: memberships, error: memErr } = await supabase
+      .from("org_members")
+      .select("org_id")
+      .limit(20);
+    if (memErr) throw new Error(memErr.message);
+
+    const ids = Array.from(
+      new Set((memberships ?? []).map((m: any) => m.org_id).filter(Boolean))
+    );
+
     if (!orgId) {
-      const { data: memberships, error: memErr } = await supabase
-        .from("org_members")
-        .select("org_id")
-        .limit(2);
-      if (memErr) throw new Error(memErr.message);
-      if ((memberships ?? []).length === 1) {
-        orgId = memberships![0].org_id as string;
+      if (ids.length === 1) {
+        orgId = ids[0];
+      } else if (ids.length > 1) {
+        // Devolver lista de organizaciones para que el cliente muestre modal
+        let orgs = ids.map((id) => ({ id, name: id }));
+        const { data: named } = await supabase
+          .from("orgs")
+          .select("id,name")
+          .in("id", ids);
+        if (named && named.length) {
+          const map = new Map(named.map((r: any) => [r.id, r.name || r.id]));
+          orgs = ids.map((id) => ({ id, name: (map.get(id) as string) ?? id }));
+        }
+        return NextResponse.json(
+          { ok: false, code: "MULTI_ORG", orgs },
+          { status: 409 }
+        );
       } else {
-        return NextResponse.json({ ok: false, error: "Varias organizaciones: proporciona orgId." }, { status: 400 });
+        return NextResponse.json(
+          { ok: false, error: "El usuario no pertenece a ninguna organización." },
+          { status: 403 }
+        );
       }
     }
 
-    let payload: any = { year, month, status: "draft" as const };
-    payload.org_id = orgId;
-
+    // Insertar período
+    let payload: any = { year, month, status: "draft" as const, org_id: orgId };
     let ins = await supabase.from("payrolls").insert(payload).select("id").single();
+
+    // Compat: organization_id si org_id no existe
     if (ins.error && /column .*org_id.* does not exist/i.test(ins.error.message)) {
       payload = { year, month, status: "draft" as const, organization_id: orgId };
       ins = await supabase.from("payrolls").insert(payload).select("id").single();
