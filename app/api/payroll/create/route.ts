@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
 
     const supabase = supabaseServer();
 
-    // Idempotencia: ¿existe ya?
+    // Idempotencia
     const { data: existing, error: exErr } = await supabase
       .from("payrolls")
       .select("id")
@@ -44,22 +44,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, id: existing[0].id, created: false });
     }
 
-    // Resolver organización
+    // Resolución de organización (si procede)
     const { data: memberships, error: memErr } = await supabase
       .from("org_members")
       .select("org_id")
       .limit(20);
-    if (memErr) throw new Error(memErr.message);
+    if (memErr) {
+      // si falla la lectura por RLS o la tabla no existe, seguimos sin org
+      // (permitimos crear sin org si el esquema lo admite)
+    }
 
-    const ids = Array.from(
-      new Set((memberships ?? []).map((m: any) => m.org_id).filter(Boolean))
-    );
+    const ids = Array.from(new Set((memberships ?? []).map((m: any) => m.org_id).filter(Boolean)));
 
     if (!orgId) {
-      if (ids.length === 1) {
-        orgId = ids[0];
-      } else if (ids.length > 1) {
-        // Devolver lista de organizaciones para que el cliente muestre modal
+      if (ids.length > 1) {
+        // MULTI_ORG → que el cliente muestre modal
         let orgs = ids.map((id) => ({ id, name: id }));
         const { data: named } = await supabase
           .from("orgs")
@@ -69,28 +68,45 @@ export async function POST(req: NextRequest) {
           const map = new Map(named.map((r: any) => [r.id, r.name || r.id]));
           orgs = ids.map((id) => ({ id, name: (map.get(id) as string) ?? id }));
         }
+        return NextResponse.json({ ok: false, code: "MULTI_ORG", orgs }, { status: 409 });
+      }
+      if (ids.length === 1) {
+        orgId = ids[0];
+      }
+      // ids.length === 0 → no imponemos org: intentamos crear sin org
+    }
+
+    // Intento 1: con org_id si la tenemos
+    let payload: any = { year, month, status: "draft" as const };
+    if (orgId) payload.org_id = orgId;
+
+    let ins = await supabase.from("payrolls").insert(payload).select("id").single();
+
+    // Compatibilidad: usar organization_id si org_id no existe
+    if (ins.error && /column .*org_id.* does not exist/i.test(ins.error.message)) {
+      payload = { year, month, status: "draft" as const };
+      if (orgId) (payload as any).organization_id = orgId;
+      ins = await supabase.from("payrolls").insert(payload).select("id").single();
+    }
+
+    // Si intentábamos sin org y el esquema exige org (NOT NULL) o RLS bloquea
+    if (ins.error) {
+      const msg = ins.error.message.toLowerCase();
+      if (msg.includes("not-null constraint") && msg.includes("org")) {
         return NextResponse.json(
-          { ok: false, code: "MULTI_ORG", orgs },
+          { ok: false, code: "ORG_REQUIRED", error: "Esta instalación requiere organización para crear nóminas." },
           { status: 409 }
         );
-      } else {
+      }
+      if (msg.includes("row-level security")) {
         return NextResponse.json(
-          { ok: false, error: "El usuario no pertenece a ninguna organización." },
+          { ok: false, code: "RLS_BLOCKED", error: "Las políticas RLS impiden crear la nómina sin organización." },
           { status: 403 }
         );
       }
+      // Otro error
+      return NextResponse.json({ ok: false, error: ins.error.message }, { status: 500 });
     }
-
-    // Insertar período
-    let payload: any = { year, month, status: "draft" as const, org_id: orgId };
-    let ins = await supabase.from("payrolls").insert(payload).select("id").single();
-
-    // Compat: organization_id si org_id no existe
-    if (ins.error && /column .*org_id.* does not exist/i.test(ins.error.message)) {
-      payload = { year, month, status: "draft" as const, organization_id: orgId };
-      ins = await supabase.from("payrolls").insert(payload).select("id").single();
-    }
-    if (ins.error) throw new Error(ins.error.message);
 
     return NextResponse.json({ ok: true, id: ins.data?.id, created: true });
   } catch (e: any) {
